@@ -1,9 +1,18 @@
 name: release
-# Push a tag like v0.1.0 to build everything and publish a GitHub release
-# plus the server image ghcr.io/<owner>/cypher.
+# Push a tag like v0.1.0, or run this workflow by hand with a version, to
+# build everything and publish a GitHub release plus the server image
+# ghcr.io/<owner>/cypher. A manual run creates the tag on the current commit.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v0.1.0"
+        required: true
+
+env:
+  VERSION: ${{ inputs.version || github.ref_name }}
 
 permissions:
   contents: write
@@ -13,6 +22,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      - name: Check version
+        run: |
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "bad version: $VERSION"; exit 1; }
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
@@ -23,8 +35,6 @@ jobs:
   binaries:
     needs: test
     runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -91,7 +101,8 @@ jobs:
           if gh release view "$VERSION" >/dev/null 2>&1; then
             gh release upload "$VERSION" dist/* --clobber
           else
-            gh release create "$VERSION" dist/* --title "cypher $VERSION" --notes-file notes.md --verify-tag
+            # On a manual run the tag does not exist yet: create it on this commit.
+            gh release create "$VERSION" dist/* --title "cypher $VERSION" --notes-file notes.md --target "$GITHUB_SHA"
           fi
 
   image:
@@ -114,10 +125,10 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ env.VERSION }}
           tags: |
-            ${{ steps.name.outputs.image }}:${{ github.ref_name }}
+            ${{ steps.name.outputs.image }}:${{ env.VERSION }}
             ${{ steps.name.outputs.image }}:latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.version=${{ env.VERSION }}
