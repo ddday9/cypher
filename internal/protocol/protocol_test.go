@@ -2,9 +2,9 @@ package protocol
 
 import (
 	"bytes"
-	"fmt"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"testing"
@@ -230,5 +230,17 @@ func TestControlRecords(t *testing.T) {
 	}
 	if g1, g2 := <-got, <-got; g1 != "1:hi" || g2 != "2:p" {
 		t.Fatalf("control: %s %s", g1, g2)
+	}
+}
+
+// TestPrefixWithControlRecord: the auth header must precede the first record
+// even when that record is a control record.
+func TestPrefixWithControlRecord(t *testing.T) {
+	a, b := net.Pipe()
+	w := NewRecordConn(a, []byte("AUTH"))
+	go func() { w.WriteControl(CtlAck, []byte{1}); a.Close() }()
+	got := make([]byte, 4)
+	if _, err := io.ReadFull(b, got); err != nil || string(got) != "AUTH" {
+		t.Fatalf("prefix: %q %v", got, err)
 	}
 }

@@ -109,7 +109,7 @@ type tunnel struct {
 }
 
 func (t *tunnel) expired(now time.Time) bool {
-	in, out := t.rc.Traffic()
+	in, out := t.traffic()
 	return now.Sub(t.created) > t.maxAge || in+out > t.maxBytes
 }
 
@@ -130,7 +130,8 @@ type pool struct {
 	started  bool
 	tick     time.Duration
 
-	freezes atomic.Int64 // frozen tunnels detected
+	freezes  atomic.Int64 // frozen tunnels detected
+	onFreeze func()
 }
 
 func newPool(tag string, size int, rot rotation, dial func(context.Context) (*link, error)) *pool {
@@ -301,12 +302,20 @@ func (p *pool) stats() (active, draining int) {
 	return len(p.active), len(p.draining)
 }
 
+func (t *tunnel) traffic() (int64, int64) {
+	if t.link.seg != nil {
+		return t.link.seg.Traffic()
+	}
+	return t.rc.Traffic()
+}
+
 // link is one connected tunnel before it joins the pool.
 type link struct {
 	sess *smux.Session
-	rc   *protocol.RecordConn
-	caps atomic.Uint32 // server capabilities from HELLO; 0 = protocol v1 server
-	pong atomic.Uint32 // id of the last PONG received
+	rc   *protocol.RecordConn // plain tunnels
+	seg  *protocol.Session    // anti-freeze tunnels (carried by many connections)
+	caps atomic.Uint32        // server capabilities from HELLO; 0 = protocol v1 server
+	pong atomic.Uint32        // id of the last PONG received
 }
 
 // Freeze detection (protocol v2 servers): a censor that "freezes" a
@@ -325,6 +334,9 @@ func (p *pool) watchdog(t *tunnel) {
 	defer tick.Stop()
 	var pingID uint32
 	var pingAt time.Time
+	if t.rc == nil {
+		return // anti-freeze sessions detect stalls themselves
+	}
 	for range tick.C {
 		if t.sess.IsClosed() {
 			return
@@ -340,6 +352,9 @@ func (p *pool) watchdog(t *tunnel) {
 			} else if now.Sub(pingAt) > freezeTimeout {
 				slog.Warn("tunnel frozen (no answer from the server), reconnecting", "outbound", p.tag, "id", t.id)
 				p.freezes.Add(1)
+				if p.onFreeze != nil {
+					p.onFreeze()
+				}
 				t.sess.Close()
 				return
 			}

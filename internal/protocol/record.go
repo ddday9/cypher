@@ -114,7 +114,9 @@ func (c *RecordConn) WriteControl(typ byte, body []byte) error {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
 	padLen := rand.IntN(65)
-	buf := make([]byte, 0, recordHeaderSize+1+len(body)+padLen)
+	buf := make([]byte, 0, len(c.prefix)+recordHeaderSize+1+len(body)+padLen)
+	buf = append(buf, c.prefix...) // the auth header, if nothing was sent yet
+	c.prefix = nil
 	buf = binary.BigEndian.AppendUint16(buf, uint16(1+len(body)))
 	buf = binary.BigEndian.AppendUint16(buf, uint16(padLen)|controlBit)
 	buf = append(buf, typ)

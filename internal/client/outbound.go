@@ -104,6 +104,7 @@ type Cypher struct {
 
 	pool   *pool
 	pinned atomic.Pointer[string] // resolved server address, see PinServer
+	seg    segState
 }
 
 // PinServer resolves the server address once and uses the IP from then on.
@@ -193,7 +194,11 @@ func newCypher(cfg config.OutboundConfig, resolve func(string) string) (*Cypher,
 	if err != nil {
 		return nil, fmt.Errorf("cypher outbound: %w", err)
 	}
+	if c.seg.mode, err = parseAntiFreeze(cfg.AntiFreeze); err != nil {
+		return nil, fmt.Errorf("cypher outbound: %w", err)
+	}
 	c.pool = newPool(c.tag, cfg.Connections, rot, c.connect)
+	c.pool.onFreeze = c.onFreeze
 	if c.insecure {
 		slog.Warn("cypher outbound: certificate verification is disabled (insecure: true) — use only for testing", "tag", c.tag)
 	}
@@ -215,24 +220,18 @@ func (c *Cypher) Close() error {
 }
 
 func (c *Cypher) connect(ctx context.Context) (*link, error) {
-	addr := c.server
-	if p := c.pinned.Load(); p != nil {
-		addr = *p
+	if c.seg.wantSegmented() {
+		return c.connectSegmented(ctx)
 	}
-	raw, err := netx.NewDialer(10*time.Second).DialContext(ctx, "tcp", addr)
+	return c.connectPlain(ctx)
+}
+
+// connectPlain opens a tunnel that carries smux directly (one TLS
+// connection per tunnel).
+func (c *Cypher) connectPlain(ctx context.Context) (*link, error) {
+	uc, err := c.dialTLS(ctx)
 	if err != nil {
 		return nil, err
-	}
-	uc := utls.UClient(raw, &utls.Config{
-		ServerName:         c.serverName,
-		RootCAs:            c.roots,
-		InsecureSkipVerify: c.insecure,
-	}, c.helloID())
-	hctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	if err := uc.HandshakeContext(hctx); err != nil {
-		raw.Close()
-		return nil, fmt.Errorf("tls handshake: %w", err)
 	}
 	ext := &protocol.Ext{Flags: protocol.FlagV2}
 	rc := protocol.NewRecordConn(uc, protocol.BuildAuthExt(c.key, time.Now(), ext))
@@ -242,6 +241,9 @@ func (c *Cypher) connect(ctx context.Context) (*link, error) {
 		case protocol.CtlHello:
 			if caps, ok := protocol.ParseHello(body); ok {
 				l.caps.Store(uint32(caps))
+				if caps&protocol.CapSegmented != 0 {
+					c.seg.supported.Store(1)
+				}
 			}
 		case protocol.CtlPong:
 			if len(body) == 4 {

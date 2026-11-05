@@ -42,6 +42,9 @@ type Server struct {
 
 	sessMu   sync.Mutex
 	sessions map[protocol.Key]map[*smux.Session]struct{}
+
+	segMu sync.Mutex
+	segs  map[[16]byte]*segEntry // anti-freeze sessions by id
 }
 
 // New builds a server from its config section. base resolves relative paths.
@@ -97,11 +100,12 @@ func New(cfg *config.ServerConfig, resolve func(string) string) (*Server, error)
 		allowPrivate: cfg.AllowPrivate,
 		resolver:     net.DefaultResolver,
 		sessions:     map[protocol.Key]map[*smux.Session]struct{}{},
+		segs:         map[[16]byte]*segEntry{},
 	}, nil
 }
 
 // serverCaps are the protocol v2 features this server offers.
-const serverCaps = protocol.CapPing
+const serverCaps = protocol.CapPing | protocol.CapSegmented
 
 func parseUsers(list []config.UserConfig) ([]protocol.User, error) {
 	var users []protocol.User
@@ -237,6 +241,10 @@ func (s *Server) handleConn(raw net.Conn) {
 	tc.SetDeadline(time.Time{})
 	user := res.User
 	rc := protocol.NewRecordConn(tc, nil)
+	if res.Ext != nil && res.Ext.Flags&protocol.FlagSegmented != 0 {
+		s.handleSegmented(rc, user, res.Ext, raw.RemoteAddr().String())
+		return
+	}
 	version := 1
 	if res.Ext != nil && res.Ext.Flags&protocol.FlagV2 != 0 {
 		// Protocol v2: answer pings and announce what this server supports.

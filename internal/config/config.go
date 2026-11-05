@@ -104,6 +104,10 @@ type OutboundConfig struct {
 	// Connections is how many TLS connections to keep in parallel (default 2).
 	Connections int             `json:"connections,omitempty"`
 	Rotation    *RotationConfig `json:"rotation,omitempty"`
+	// AntiFreeze: "auto" (default) switches to short connections after a
+	// connection freeze is detected; "on" always uses them; "off" never.
+	// Needs a server of protocol version 2.
+	AntiFreeze string `json:"antiFreeze,omitempty"`
 }
 
 // RotationConfig controls how long a tunnel connection lives. Each value is
