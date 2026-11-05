@@ -308,7 +308,7 @@ function fillSettings() {
   $("customRules").value = (draft.customRules && draft.customRules.length) ? JSON.stringify(draft.customRules, null, 2) : "";
   $("defaultAction").value = draft.defaultAction || "proxy";
   $("sysProxy").checked = draft.systemProxy;
-  $("fingerprint").value = draft.fingerprint || "";
+  $("fingerprint").value = draft.fingerprint === "firefox" ? "" : (draft.fingerprint || "");
   $("antiFreeze").value = draft.antiFreeze || "";
   $("connMode").value = draft.single ? "single" : "";
   $("antiFreezeRate").value = String([20, 1000].includes(draft.antiFreezeRate) ? draft.antiFreezeRate : 0);

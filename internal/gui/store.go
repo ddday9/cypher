@@ -52,7 +52,7 @@ type Settings struct {
 	GeositeURL     string    `json:"geositeUrl"`
 	GeoipURL       string    `json:"geoipUrl"`
 	GeoUpdated     time.Time `json:"geoUpdated"`
-	Fingerprint    string    `json:"fingerprint,omitempty"`    // overrides profiles when set
+	Fingerprint    string    `json:"fingerprint,omitempty"`    // "" = firefox; "link" = from the server link; or a name
 	AntiFreeze     string    `json:"antiFreeze,omitempty"`     // auto (default), on, off; overrides profiles
 	AntiFreezeRate int       `json:"antiFreezeRate,omitempty"` // new connections per 10 s in anti-freeze mode
 	Single         bool      `json:"single,omitempty"`         // strictly one connection; overrides profiles

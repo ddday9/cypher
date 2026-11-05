@@ -108,16 +108,16 @@
       <h3>Подключение</h3>
       <div class="card list">
         <label class="item"><span>Системный прокси Windows<small>Включать автоматически в режиме «Прокси»</small></span><input type="checkbox" id="sysProxy" class="switch"></label>
-        <label class="item"><span>Отпечаток TLS<small>Как клиент выглядит для DPI</small></span>
+        <label class="item"><span>Отпечаток TLS<small>Каким браузером клиент выглядит для DPI. «Случайный» выбирается один раз для сервера и дальше не меняется</small></span>
           <select id="fingerprint">
-            <option value="">Из настроек сервера</option>
-            <option value="firefox">Firefox</option>
+            <option value="">Firefox (по умолчанию)</option>
             <option value="chrome">Chrome</option>
             <option value="safari">Safari</option>
             <option value="edge">Edge</option>
             <option value="ios">iOS</option>
             <option value="android">Android</option>
             <option value="random">Случайный</option>
+            <option value="link">Как в ссылке сервера</option>
           </select></label>
         <label class="item"><span>Соединения<small>«Одно» — строго одно TLS-соединение к серверу, без ротации внахлёст и без защиты от заморозки</small></span>
           <select id="connMode">

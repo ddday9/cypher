@@ -150,8 +150,16 @@ func (a *App) selected(st State) (Profile, error) {
 
 // BuildConfig turns a profile and settings into a client configuration.
 func (a *App) BuildConfig(p Profile, s Settings) *config.Config {
-	fp := p.Fingerprint
-	if s.Fingerprint != "" {
+	// Firefox unless the user picked another fingerprint in the settings;
+	// a fingerprint from the server link is used only with "link".
+	fp := "firefox"
+	switch s.Fingerprint {
+	case "":
+	case "link":
+		if p.Fingerprint != "" {
+			fp = p.Fingerprint
+		}
+	default:
 		fp = s.Fingerprint
 	}
 	antiFreeze := p.AntiFreeze

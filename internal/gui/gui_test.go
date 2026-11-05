@@ -101,8 +101,12 @@ func TestImportSelectAndConfig(t *testing.T) {
 	if _, err := app.NewClient(cfg); err != nil {
 		t.Fatalf("custom config rejected: %v", err)
 	}
-	if cfg.Outbounds[0].Fingerprint != "chrome" {
-		t.Fatalf("profile fingerprint lost: %q", cfg.Outbounds[0].Fingerprint)
+	if cfg.Outbounds[0].Fingerprint != "firefox" {
+		t.Fatalf("default fingerprint is %q, want firefox even if the link says chrome", cfg.Outbounds[0].Fingerprint)
+	}
+	set.Fingerprint = "link"
+	if fp := a.BuildConfig(p, set).Outbounds[0].Fingerprint; fp != "chrome" {
+		t.Fatalf("link fingerprint not used: %q", fp)
 	}
 	set.Fingerprint = "safari"
 	if a.BuildConfig(p, set).Outbounds[0].Fingerprint != "safari" {

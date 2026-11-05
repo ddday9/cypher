@@ -346,6 +346,12 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	switch in.Fingerprint {
+	case "", "link", "firefox", "chrome", "safari", "edge", "ios", "android", "random":
+	default:
+		writeErr(w, errors.New("неизвестный отпечаток TLS"))
+		return
+	}
 	switch in.AntiFreeze {
 	case "", "auto", "on", "off":
 	default:
