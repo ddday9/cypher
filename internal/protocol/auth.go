@@ -221,7 +221,7 @@ type AuthResult struct {
 }
 
 // ReadAuthExt is ReadAuth that also returns the client's extension.
-func (a *Authenticator) ReadAuthExt(conn net.Conn) (*AuthResult, []byte, error) {
+func (a *Authenticator) ReadAuthExt(conn io.Reader) (*AuthResult, []byte, error) {
 	buf := make([]byte, AuthHeaderSize)
 	n := 0
 	for n < AuthHeaderSize {

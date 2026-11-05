@@ -15,6 +15,17 @@ const (
 
 	CmdTCP byte = 1
 	CmdUDP byte = 3
+	// CmdE2E: the stream carries an end-to-end encrypted session for the
+	// exit (frames, see e2e.go); no address follows. A relay forwards it to
+	// its upstream; an exit answers StatusE2E and runs the handshake.
+	CmdE2E byte = 4
+	// CmdFlagE2E marks a TCP or UDP request sent to a relay (CapRelay) by a
+	// client that can encrypt for the exit. The client's first e2e frame
+	// follows the address. The relay applies its routing to the address:
+	// it handles the stream itself (StatusOK, the frame is dropped and data
+	// follows in the clear, as for any request) or passes it to the exit
+	// (StatusE2E from the exit, then the encrypted session).
+	CmdFlagE2E byte = 0x80
 )
 
 // Stream status codes sent by the server after it tries to reach the target.
@@ -24,6 +35,8 @@ const (
 	StatusNotAllowed  byte = 2
 	StatusUnreachable byte = 4
 	StatusRefused     byte = 5
+	// StatusE2E: an end-to-end encrypted session follows (from the exit).
+	StatusE2E byte = 6
 )
 
 // StatusError is returned by the client when the server could not connect.
@@ -58,6 +71,17 @@ func WriteRequest(w io.Writer, req Request) error {
 	return err
 }
 
+// E2ERequestHeader is the stream header of an end-to-end encrypted request
+// sent through a relay: CmdE2E alone when the destination is hidden from
+// the relay, otherwise req marked with CmdFlagE2E. The client's first e2e
+// frame follows it.
+func E2ERequestHeader(req Request, hide bool) ([]byte, error) {
+	if hide {
+		return []byte{requestVersion, CmdE2E}, nil
+	}
+	return netx.AppendAddr([]byte{requestVersion, req.Cmd | CmdFlagE2E}, req.Dest)
+}
+
 // ReadRequest decodes a stream header.
 func ReadRequest(r io.Reader) (Request, error) {
 	var req Request
@@ -69,8 +93,11 @@ func ReadRequest(r io.Reader) (Request, error) {
 		return req, fmt.Errorf("unsupported request version %d", hdr[0])
 	}
 	req.Cmd = hdr[1]
+	if req.Cmd == CmdE2E {
+		return req, nil
+	}
 	network := "tcp"
-	if req.Cmd == CmdUDP {
+	if req.Cmd&^CmdFlagE2E == CmdUDP {
 		network = "udp"
 	}
 	d, err := netx.ReadAddr(r, network)

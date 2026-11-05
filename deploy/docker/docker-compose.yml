@@ -3,6 +3,7 @@
 #   1. Point your domain (A record) at this server; open TCP ports 80 and 443.
 #   2. echo "CYPHER_DOMAIN=example.com" > .env   (optionally CYPHER_EMAIL=you@example.com)
 #   3. docker compose up -d && docker compose logs cypher   ← the client link is printed here
+#   Relay in Russia: also put CYPHER_UPSTREAM=<link of a user on the exit> into .env
 #
 # cypher gets the Let's Encrypt certificate itself (no certbot) and renews it
 # automatically 30 days before expiry, without a restart.
@@ -28,6 +29,10 @@ services:
       # 1 = the server refuses Russian sites, so its IP is not seen on them
       # (clients send Russian traffic directly by default anyway).
       CYPHER_BLOCK_RU: ${CYPHER_BLOCK_RU:-0}
+      # Relay mode (a server in Russia in front of the exit abroad): a
+      # cypher:// link of a user on the exit server. Russian sites leave from
+      # here, everything else goes through the exit (geosite/geoip rules).
+      CYPHER_UPSTREAM: ${CYPHER_UPSTREAM:-}
     volumes:
       # Config, user keys and the certificate.
       - cypher-data:/etc/cypher

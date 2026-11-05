@@ -106,6 +106,7 @@ func startServerOpts(t *testing.T, allowPrivate bool, setup func(*server.Server)
 		KeyFile:      keyFile,
 		Users:        []config.UserConfig{{Name: "test", Key: key.String()}},
 		AllowPrivate: allowPrivate,
+		E2EKeyFile:   filepath.Join(dir, "e2e.key"),
 	}, func(p string) string { return p })
 	if err != nil {
 		t.Fatal(err)
@@ -383,7 +384,7 @@ func TestFallbackSite(t *testing.T) {
 	certFile, keyFile, pool := writeCert(t, dir)
 	site := filepath.Join(dir, "site")
 	os.MkdirAll(filepath.Join(site, "sub"), 0o755)
-	s, err := server.New(&config.ServerConfig{
+	s, err := server.New(&config.ServerConfig{E2EKeyFile: filepath.Join(t.TempDir(), "e2e.key"),
 		CertFile: certFile, KeyFile: keyFile,
 		Users:    []config.UserConfig{{Key: protocol.GenerateKey().String()}},
 		Fallback: config.FallbackConfig{Dir: site},
@@ -425,7 +426,7 @@ func TestRevokeUser(t *testing.T) {
 	dir := t.TempDir()
 	certFile, keyFile, _ := writeCert(t, dir)
 	alice, bob := protocol.GenerateKey(), protocol.GenerateKey()
-	s, err := server.New(&config.ServerConfig{
+	s, err := server.New(&config.ServerConfig{E2EKeyFile: filepath.Join(t.TempDir(), "e2e.key"),
 		CertFile: certFile, KeyFile: keyFile, AllowPrivate: true,
 		Users: []config.UserConfig{{Name: "alice", Key: alice.String()}},
 	}, func(p string) string { return p })
@@ -497,7 +498,7 @@ func TestServerRouting(t *testing.T) {
 	echoRoundTrip(t, c, "ok")
 	// Only direct/block are valid on a server.
 	id := func(p string) string { return p }
-	s, err := server.New(&config.ServerConfig{CertFile: e.caFile, KeyFile: e.keyFile,
+	s, err := server.New(&config.ServerConfig{E2EKeyFile: filepath.Join(t.TempDir(), "e2e.key"), CertFile: e.caFile, KeyFile: e.keyFile,
 		Users: []config.UserConfig{{Key: protocol.GenerateKey().String()}}}, id)
 	if err != nil {
 		t.Fatal(err)

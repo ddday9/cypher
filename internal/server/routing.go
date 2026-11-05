@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 
@@ -11,8 +10,9 @@ import (
 )
 
 // SetRouting applies server-side rules (same format as the client's
-// "routing" section). Outbounds are "direct" and "block"; inboundTag
-// matches the user name, so rules can target one user.
+// "routing" section). Outbounds are "direct", "block" and, on a relay,
+// "exit"; inboundTag matches the user name, so rules can target one user.
+// Without rules everything goes direct (or to the exit on a relay).
 func (s *Server) SetRouting(rc config.RoutingConfig, resolve func(string) string) error {
 	if len(rc.Rules) == 0 {
 		s.router.Store(nil)
@@ -26,27 +26,27 @@ func (s *Server) SetRouting(rc config.RoutingConfig, resolve func(string) string
 		ip = "geoip.dat"
 	}
 	if rc.Default == "" {
-		rc.Default = "direct"
+		rc.Default = s.defaultRoute()
 	}
-	r, err := router.New(rc, "direct", router.NewGeoLoader(resolve(site), resolve(ip)))
+	r, err := router.New(rc, s.defaultRoute(), router.NewGeoLoader(resolve(site), resolve(ip)))
 	if err != nil {
 		return err
 	}
 	for _, tag := range append([]string{r.DefaultTag()}, r.OutboundTags()...) {
-		if tag != "direct" && tag != "block" {
-			return fmt.Errorf("server routing: outbound must be \"direct\" or \"block\", got %q", tag)
+		switch {
+		case tag == routeDirect || tag == routeBlock:
+		case tag == routeExit && s.exit != nil:
+		case tag == routeExit:
+			return fmt.Errorf("server routing: outbound \"exit\" needs server.upstream (relay mode)")
+		default:
+			return fmt.Errorf("server routing: outbound must be \"direct\", \"block\" or \"exit\", got %q", tag)
 		}
 	}
 	s.router.Store(r)
-	slog.Info("server routing rules applied", "rules", len(rc.Rules))
+	slog.Info("server routing rules applied", "rules", len(rc.Rules), "default", r.DefaultTag())
 	return nil
 }
 
-// blocked reports whether the server rules forbid this destination for user.
-func (s *Server) blocked(user string, dest netx.Destination) bool {
-	r := s.router.Load()
-	if r == nil {
-		return false
-	}
-	return r.Route(context.Background(), router.Metadata{InboundTag: user, Dest: dest}) == "block"
+func routerMetadata(user string, dest netx.Destination) router.Metadata {
+	return router.Metadata{InboundTag: user, Dest: dest}
 }

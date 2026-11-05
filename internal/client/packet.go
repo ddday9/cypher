@@ -10,12 +10,11 @@ import (
 
 	"github.com/ddday9/cypher/internal/netx"
 	"github.com/ddday9/cypher/internal/protocol"
-	"github.com/xtaci/smux"
 )
 
 // streamPacketConn carries datagrams over a cypher UDP stream.
 type streamPacketConn struct {
-	st  *smux.Stream
+	st  net.Conn
 	br  *bufio.Reader
 	wmu sync.Mutex
 	buf []byte

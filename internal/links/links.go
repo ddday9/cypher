@@ -28,7 +28,16 @@ type Link struct {
 	Connections int    `json:"connections,omitempty"`
 	AntiFreeze  string `json:"antiFreeze,omitempty"` // auto, on, off
 	Single      bool   `json:"single,omitempty"`     // strictly one connection
+	// End-to-end encryption through a relay (see config.OutboundConfig).
+	// ExitPublicKey is also put into an exit's own links, so a relay can
+	// be set up from one.
+	ExitKey       string `json:"exitKey,omitempty"`       // ek
+	ExitPublicKey string `json:"exitPublicKey,omitempty"` // epk
+	Hide          bool   `json:"hide,omitempty"`          // hd=1: hide destinations from the relay
 }
+
+// E2E reports whether the link asks for end-to-end encryption.
+func (l Link) E2E() bool { return l.ExitKey != "" && l.ExitPublicKey != "" }
 
 // Format returns the share link.
 func Format(l Link) string {
@@ -48,6 +57,15 @@ func Format(l Link) string {
 	}
 	if l.Single {
 		q.Set("sc", "1")
+	}
+	if l.ExitKey != "" {
+		q.Set("ek", l.ExitKey)
+	}
+	if l.ExitPublicKey != "" {
+		q.Set("epk", l.ExitPublicKey)
+	}
+	if l.Hide {
+		q.Set("hd", "1")
 	}
 	u.RawQuery = q.Encode()
 	return u.String()
@@ -87,6 +105,19 @@ func Parse(s string) (Link, error) {
 		l.AntiFreeze = af
 	}
 	l.Single = q.Get("sc") == "1"
+	if ek := q.Get("ek"); ek != "" {
+		if _, err := protocol.ParseKey(ek); err != nil {
+			return l, fmt.Errorf("exit key: %w", err)
+		}
+		l.ExitKey = ek
+	}
+	if epk := q.Get("epk"); epk != "" {
+		if _, err := protocol.ParseE2EPublic(epk); err != nil {
+			return l, err
+		}
+		l.ExitPublicKey = epk
+	}
+	l.Hide = q.Get("hd") == "1"
 	l.Name = u.Fragment
 	if l.Name == "" {
 		host, _, _ := net.SplitHostPort(l.Server)

@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -14,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ddday9/cypher/internal/client"
 	"github.com/ddday9/cypher/internal/config"
 	"github.com/ddday9/cypher/internal/netx"
 	"github.com/ddday9/cypher/internal/protocol"
@@ -50,8 +52,15 @@ type Server struct {
 	// upstream is where client traffic leaves the server.
 	upstream Upstream
 
+	// exit is the upstream server of a relay (nil: traffic goes to the
+	// internet). e2eKey lets this server be the exit of end-to-end
+	// encrypted streams (nil: unavailable).
+	exit   *client.Cypher
+	e2eKey *protocol.E2EKey
+	caps   uint16
+
 	sessMu   sync.Mutex
-	sessions map[protocol.Key]map[*smux.Session]struct{}
+	sessions map[protocol.Key]map[io.Closer]struct{}
 
 	segMu sync.Mutex
 	segs  map[[16]byte]*segEntry // anti-freeze sessions by id
@@ -98,7 +107,7 @@ func New(cfg *config.ServerConfig, resolve func(string) string) (*Server, error)
 	if listen == "" {
 		listen = ":443"
 	}
-	return &Server{
+	s := &Server{
 		listen: listen,
 		tlsConfig: &tls.Config{
 			GetCertificate: getCert,
@@ -109,16 +118,34 @@ func New(cfg *config.ServerConfig, resolve func(string) string) (*Server, error)
 		fallback:     fb,
 		allowPrivate: cfg.AllowPrivate,
 		resolver:     net.DefaultResolver,
-		sessions:     map[protocol.Key]map[*smux.Session]struct{}{},
+		sessions:     map[protocol.Key]map[io.Closer]struct{}{},
 		segs:         map[[16]byte]*segEntry{},
 		upstream:     directUpstream{},
-	}, nil
+		caps:         serverCaps,
+	}
+	if cfg.Upstream != nil {
+		exit, err := newExit(cfg.Upstream, resolve)
+		if err != nil {
+			return nil, err
+		}
+		s.exit = exit
+		s.caps |= protocol.CapRelay
+	}
+	keyFile := cfg.E2EKeyFile
+	if keyFile == "" {
+		keyFile = "e2e.key"
+	}
+	if k, err := LoadOrCreateE2EKey(resolve(keyFile)); err != nil {
+		slog.Warn("end-to-end encryption through relays is off: no key", "file", resolve(keyFile), "err", err)
+	} else {
+		s.e2eKey = &k
+		s.caps |= protocol.CapE2E
+	}
+	return s, nil
 }
 
-// Upstream is where the server sends client traffic. Today that is the
-// internet directly. It is the hook for chaining servers later: a relay
-// would implement it with a cypher outbound to the next server (and
-// announce protocol.CapRelay).
+// Upstream dials the internet for the "direct" route (replaceable in tests).
+// The "exit" route of a relay goes through Server.exit instead.
 type Upstream interface {
 	DialTCP(ctx context.Context, addr netip.AddrPort) (net.Conn, error)
 }
@@ -184,7 +211,7 @@ func (s *Server) SetUsers(list []config.UserConfig) error {
 	return nil
 }
 
-func (s *Server) track(k protocol.Key, sess *smux.Session) {
+func (s *Server) track(k protocol.Key, sess io.Closer) {
 	s.sessMu.Lock()
 	defer s.sessMu.Unlock()
 	// The user may have been revoked between authentication and here.
@@ -193,12 +220,12 @@ func (s *Server) track(k protocol.Key, sess *smux.Session) {
 		return
 	}
 	if s.sessions[k] == nil {
-		s.sessions[k] = map[*smux.Session]struct{}{}
+		s.sessions[k] = map[io.Closer]struct{}{}
 	}
 	s.sessions[k][sess] = struct{}{}
 }
 
-func (s *Server) untrack(k protocol.Key, sess *smux.Session) {
+func (s *Server) untrack(k protocol.Key, sess io.Closer) {
 	s.sessMu.Lock()
 	defer s.sessMu.Unlock()
 	delete(s.sessions[k], sess)
@@ -280,7 +307,7 @@ func (s *Server) handleConn(raw net.Conn) {
 				rc.WriteControl(protocol.CtlPong, body)
 			}
 		})
-		if err := rc.WriteControl(protocol.CtlHello, protocol.Hello(serverCaps)); err != nil {
+		if err := rc.WriteControl(protocol.CtlHello, protocol.Hello(s.caps)); err != nil {
 			tc.Close()
 			return
 		}
@@ -318,33 +345,77 @@ func (s *Server) handleStream(st *smux.Stream, user *protocol.User) {
 		slog.Debug("bad request", "user", user.Name, "err", err)
 		return
 	}
-	switch req.Cmd {
-	case protocol.CmdTCP:
-	case protocol.CmdUDP:
-		s.handleUDP(st, user)
-		return
+	switch {
+	case req.Cmd == protocol.CmdE2E && s.exit != nil:
+		s.forwardE2E(st, user) // destination hidden from us: the exit decides
+	case req.Cmd == protocol.CmdE2E:
+		s.handleE2E(st, user)
+	case req.Cmd&protocol.CmdFlagE2E != 0 && s.exit != nil:
+		s.handleRelayE2E(st, user, req)
+	case req.Cmd == protocol.CmdTCP || req.Cmd == protocol.CmdUDP:
+		s.serve(st, user, req, s.route(user.Name, req.Dest), plainAnswer(st))
 	default:
 		st.Write([]byte{protocol.StatusFailure})
+	}
+}
+
+// answerFunc sends the request's status and returns the connection the data
+// flows on (the stream itself, or its end-to-end encrypted layer).
+type answerFunc func(status byte) (net.Conn, error)
+
+func plainAnswer(st net.Conn) answerFunc {
+	return func(status byte) (net.Conn, error) {
+		if _, err := st.Write([]byte{status}); err != nil {
+			return nil, err
+		}
+		if status != protocol.StatusOK {
+			return nil, protocol.StatusError(status)
+		}
+		return st, nil
+	}
+}
+
+// serve carries out a TCP or UDP request along route.
+func (s *Server) serve(st net.Conn, user *protocol.User, req protocol.Request, route string, answer answerFunc) {
+	if req.Cmd == protocol.CmdUDP {
+		if route == routeBlock {
+			answer(protocol.StatusNotAllowed)
+			return
+		}
+		conn, err := answer(protocol.StatusOK)
+		if err != nil {
+			return
+		}
+		conn.SetDeadline(time.Time{})
+		s.handleUDP(conn, user)
 		return
 	}
-	if s.blocked(user.Name, req.Dest) {
-		st.Write([]byte{protocol.StatusNotAllowed})
+	var target net.Conn
+	var status byte
+	switch route {
+	case routeBlock:
+		status = protocol.StatusNotAllowed
 		slog.Debug("blocked by server rules", "user", user.Name, "dest", req.Dest.String())
-		return
+	case routeExit:
+		ctx, cancel := context.WithTimeout(context.Background(), 2*dialTimeout)
+		target, status = s.dialExit(ctx, req.Dest)
+		cancel()
+	default:
+		ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+		target, status = s.dial(ctx, req.Dest)
+		cancel()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
-	target, status := s.dial(ctx, req.Dest)
-	cancel()
-	if _, err := st.Write([]byte{status}); err != nil || status != protocol.StatusOK {
+	conn, err := answer(status)
+	if err != nil || status != protocol.StatusOK {
 		if target != nil {
 			target.Close()
 		}
-		slog.Debug("connect failed", "user", user.Name, "dest", req.Dest.String(), "status", status)
+		slog.Debug("connect failed", "user", user.Name, "dest", req.Dest.String(), "route", route, "status", status)
 		return
 	}
-	st.SetDeadline(time.Time{})
-	slog.Debug("connect", "user", user.Name, "dest", req.Dest.String())
-	netx.Relay(st, target)
+	conn.SetDeadline(time.Time{})
+	slog.Debug("connect", "user", user.Name, "dest", req.Dest.String(), "route", route)
+	netx.Relay(conn, target)
 }
 
 // dial resolves the destination itself so that private-address filtering

@@ -1,0 +1,25 @@
+{
+  "log": { "level": "info" },
+  "server": {
+    "listen": ":443",
+    "acme": { "domain": "relay.example.ru", "cacheDir": "acme", "httpListen": ":80" },
+    "users": [
+      { "name": "phone", "key": "REPLACE_WITH_OUTPUT_OF_cypher_genkey" }
+    ],
+    "upstream": { "link": "cypher://KEY_OF_USER_relay_ON_THE_EXIT@exit.example.com:443?epk=EXIT_PUBLIC_KEY" },
+    "fallback": { "dir": "/var/www/site" },
+    "allowPrivate": false
+  },
+  "routing": {
+    "geositeURL": "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat",
+    "geoipURL": "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat",
+    "geoUpdate": "24h",
+    "rules": [
+      { "domain": ["geosite:ru-blocked"], "outbound": "exit" },
+      { "ip": ["geoip:ru-blocked"], "outbound": "exit" },
+      { "domain": ["geosite:category-ru", "geosite:ru-available-only-inside", "domain:ru", "domain:xn--p1ai", "domain:su"], "outbound": "direct" },
+      { "ip": ["geoip:ru"], "outbound": "direct" }
+    ],
+    "default": "exit"
+  }
+}

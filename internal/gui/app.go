@@ -178,7 +178,8 @@ func (a *App) BuildConfig(p Profile, s Settings) *config.Config {
 	cfg.Outbounds = []config.OutboundConfig{
 		{Tag: "proxy", Type: "cypher", Server: p.Server, ServerName: p.ServerName, Key: p.Key,
 			Fingerprint: fp, Connections: p.Connections, AntiFreeze: antiFreeze, AntiFreezeRate: s.AntiFreezeRate,
-			SingleConnection: p.Single || s.Single},
+			SingleConnection: p.Single || s.Single,
+			ExitKey:          p.ExitKey, ExitPublicKey: p.ExitPublicKey, HideDestinations: p.Hide},
 		{Tag: "direct", Type: "direct"},
 		{Tag: "block", Type: "block"},
 	}

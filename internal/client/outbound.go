@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -115,7 +116,11 @@ type Cypher struct {
 
 	pool   *pool
 	pinned atomic.Pointer[string] // resolved server address, see PinServer
-	seg    segState
+	e2e    *e2eConfig
+	// eagerHello: learn the server's capabilities right after connecting
+	// (set for a relay's upstream, see NeedCaps).
+	eagerHello bool
+	seg        segState
 }
 
 // PinServer resolves the server address once and uses the IP from then on.
@@ -181,7 +186,20 @@ func newCypher(cfg config.OutboundConfig, resolve func(string) string) (*Cypher,
 		hello = randomPool[int(h[0])%len(randomPool)]
 		slog.Info("fingerprint chosen", "outbound", cfg.Tag, "fingerprint", hello.Client)
 	}
+	var e2e *e2eConfig
+	if cfg.ExitKey != "" || cfg.ExitPublicKey != "" {
+		ek, err := protocol.ParseKey(cfg.ExitKey)
+		if err != nil {
+			return nil, fmt.Errorf("cypher outbound: exitKey: %w", err)
+		}
+		pub, err := protocol.ParseE2EPublic(cfg.ExitPublicKey)
+		if err != nil {
+			return nil, fmt.Errorf("cypher outbound: exitPublicKey: %w", err)
+		}
+		e2e = &e2eConfig{pub: pub, key: ek, hide: cfg.HideDestinations}
+	}
 	c := &Cypher{
+		e2e:        e2e,
 		tag:        cfg.Tag,
 		server:     cfg.Server,
 		serverName: cfg.ServerName,
@@ -259,7 +277,8 @@ func (c *Cypher) connectPlain(ctx context.Context) (*link, error) {
 	}
 	ext := &protocol.Ext{Flags: protocol.FlagV2 | protocol.FlagQuietIdle}
 	rc := protocol.NewRecordConn(uc, protocol.BuildAuthExt(c.key, time.Now(), ext))
-	l := &link{rc: rc}
+	l := newLink()
+	l.rc = rc
 	rc.SetControlHandler(func(typ byte, body []byte) {
 		switch typ {
 		case protocol.CtlHello:
@@ -269,6 +288,7 @@ func (c *Cypher) connectPlain(ctx context.Context) (*link, error) {
 					c.seg.supported.Store(1)
 				}
 			}
+			l.helloDone()
 		case protocol.CtlPong:
 			if len(body) == 4 {
 				l.pong.Store(binary.BigEndian.Uint32(body))
@@ -281,6 +301,16 @@ func (c *Cypher) connectPlain(ctx context.Context) (*link, error) {
 		return nil, err
 	}
 	l.sess = sess
+	if c.e2e != nil || c.eagerHello {
+		// The server speaks only after our auth header, which otherwise
+		// goes out with the first stream. Streams that depend on the
+		// server's capabilities need its HELLO first, so send the header
+		// now in an empty record (which older servers skip).
+		if _, err := rc.Write(nil); err != nil {
+			sess.Close()
+			return nil, err
+		}
+	}
 	// Servers without CapQuietIdle (older versions) drop a session after
 	// 60 s without data, so they get keepalives even while it is idle. A
 	// server sends keepalives while streams are open; nothing at all for
@@ -290,6 +320,69 @@ func (c *Cypher) connectPlain(ctx context.Context) (*link, error) {
 		rc.LastRead, deadServerTimeout, 0)
 	slog.Debug("connected to server", "outbound", c.tag, "server", c.server)
 	return l, nil
+}
+
+// e2eConfig is set when streams to the exit behind a relay are encrypted
+// end to end.
+type e2eConfig struct {
+	pub  []byte
+	key  protocol.Key
+	hide bool
+}
+
+// errE2E marks an end-to-end handshake failure: the tunnel is fine, so the
+// request is not retried on another one.
+type errE2E struct{ err error }
+
+func (e errE2E) Error() string { return "end-to-end encryption with the exit: " + e.err.Error() }
+func (e errE2E) Unwrap() error { return e.err }
+
+// ErrNoE2E is returned by OpenE2E when the server does not accept
+// end-to-end encrypted streams (an exit older than v0.3).
+var ErrNoE2E = errors.New("server does not support end-to-end encrypted streams")
+
+// NeedCaps makes new tunnels ask for the server's capabilities at once
+// (a relay checks them before forwarding end-to-end streams).
+func (c *Cypher) NeedCaps() { c.eagerHello = true }
+
+// SupportsE2E reports whether the server (seen as an exit) accepts
+// end-to-end encrypted streams. It connects if needed.
+func (c *Cypher) SupportsE2E(ctx context.Context) bool {
+	t, err := c.pool.get(ctx, nil)
+	if err != nil {
+		return false
+	}
+	return t.link.serverCaps(ctx)&protocol.CapE2E != 0
+}
+
+// OpenE2E opens a stream for an end-to-end encrypted session and sends its
+// header; a relay then copies the client's frames into it. The exit's
+// answer (StatusE2E and its handshake frame) comes back on the stream.
+func (c *Cypher) OpenE2E(ctx context.Context) (net.Conn, error) {
+	var bad *tunnel
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		t, err := c.pool.get(ctx, bad)
+		if err != nil {
+			return nil, err
+		}
+		if t.link.serverCaps(ctx)&protocol.CapE2E == 0 {
+			return nil, ErrNoE2E
+		}
+		st, err := t.sess.OpenStream()
+		if err != nil {
+			lastErr, bad = err, t
+			continue
+		}
+		hdr, _ := protocol.E2ERequestHeader(protocol.Request{}, true)
+		if _, err := st.Write(hdr); err != nil {
+			st.Close()
+			lastErr, bad = err, t
+			continue
+		}
+		return st, nil
+	}
+	return nil, lastErr
 }
 
 // Dial opens a stream to dest through the server.
@@ -306,7 +399,7 @@ func (c *Cypher) ListenPacket(ctx context.Context, dest netx.Destination) (netx.
 	return &streamPacketConn{st: st, br: bufio.NewReader(st)}, nil
 }
 
-func (c *Cypher) openStream(ctx context.Context, req protocol.Request) (*smux.Stream, error) {
+func (c *Cypher) openStream(ctx context.Context, req protocol.Request) (net.Conn, error) {
 	var lastErr error
 	var bad *tunnel
 	for attempt := 0; attempt < 2; attempt++ {
@@ -314,22 +407,79 @@ func (c *Cypher) openStream(ctx context.Context, req protocol.Request) (*smux.St
 		if err != nil {
 			return nil, err
 		}
+		viaRelay := c.e2e != nil && t.link.serverCaps(ctx)&protocol.CapRelay != 0
 		st, err := t.sess.OpenStream()
 		if err != nil {
 			lastErr, bad = err, t
 			continue // tunnel is dead; try another one
 		}
-		err = c.request(ctx, st, req)
+		var conn net.Conn = st
+		if viaRelay {
+			conn, err = c.requestE2E(ctx, st, req)
+		} else {
+			err = c.request(ctx, st, req)
+		}
 		if err == nil {
-			return st, nil
+			return conn, nil
 		}
 		var se protocol.StatusError
-		if errors.As(err, &se) {
+		var ee errE2E
+		if errors.As(err, &se) || errors.As(err, &ee) {
 			return nil, err // the server answered; reconnecting will not help
 		}
 		lastErr, bad = err, t
 	}
 	return nil, lastErr
+}
+
+// requestE2E sends req through a relay, encrypted for the exit. The relay
+// may also handle the stream itself (its routing sent the destination
+// elsewhere); then the stream continues in the clear like any other.
+func (c *Cypher) requestE2E(ctx context.Context, st *smux.Stream, req protocol.Request) (net.Conn, error) {
+	deadline := time.Now().Add(20 * time.Second)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	st.SetDeadline(deadline)
+	init, frame, err := protocol.NewE2EInitiator(c.e2e.pub, c.e2e.key, req)
+	if err != nil {
+		st.Close()
+		return nil, errE2E{err}
+	}
+	hdr, err := protocol.E2ERequestHeader(req, c.e2e.hide)
+	if err != nil {
+		st.Close()
+		return nil, err
+	}
+	if _, err := st.Write(append(hdr, frame...)); err != nil {
+		st.Close()
+		return nil, err
+	}
+	var status [1]byte
+	if _, err := io.ReadFull(st, status[:]); err != nil {
+		st.Close()
+		return nil, err
+	}
+	switch status[0] {
+	case protocol.StatusOK: // the relay handles it
+		st.SetDeadline(time.Time{})
+		return st, nil
+	case protocol.StatusE2E:
+		conn, err := init.Finish(st)
+		if err != nil {
+			st.Close()
+			var se protocol.StatusError
+			if errors.As(err, &se) {
+				return nil, err
+			}
+			return nil, errE2E{err}
+		}
+		st.SetDeadline(time.Time{})
+		return conn, nil
+	default:
+		st.Close()
+		return nil, protocol.StatusError(status[0])
+	}
 }
 
 func (c *Cypher) request(ctx context.Context, st *smux.Stream, req protocol.Request) error {

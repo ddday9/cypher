@@ -15,12 +15,14 @@
 #   --site DIR        static website shown to non-clients (default: a placeholder)
 #   --add-user NAME   add a user (with a new key) to an existing config
 #   --no-nginx        do not install nginx; cypher serves port 80 itself
+#   --upstream LINK   relay mode: a cypher:// link of a user on the exit server;
+#                     Russian sites leave from here, the rest via the exit
 #
 # Users later: cypher user add|list|revoke NAME -c /etc/cypher/server.json
 # (applied by the running server within seconds, no restart).
 set -euo pipefail
 
-DOMAIN="" EMAIL="" SELF_SIGNED=0 BINARY="" PORT=443 SITE_SRC="" ADD_USER="" NO_NGINX=0
+DOMAIN="" EMAIL="" SELF_SIGNED=0 BINARY="" PORT=443 SITE_SRC="" ADD_USER="" NO_NGINX=0 UPSTREAM=""
 ETC=/etc/cypher
 WWW=/var/www/cypher
 UNIT=/etc/systemd/system/cypher.service
@@ -39,6 +41,7 @@ while [[ $# -gt 0 ]]; do
     --site) SITE_SRC="$2"; shift 2 ;;
     --add-user) ADD_USER="$2"; shift 2 ;;
     --no-nginx) NO_NGINX=1; shift ;;
+    --upstream) UPSTREAM="$2"; shift 2 ;;
     -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
@@ -154,6 +157,9 @@ if [[ $SELF_SIGNED -eq 1 && ! -f $ETC/cert.pem ]]; then
   chmod 640 $ETC/cert.pem $ETC/key.pem
 fi
 install -d -m 770 -o root -g cypher $ETC/acme
+# Files the server writes itself: geo lists, the end-to-end key.
+VAR=/var/lib/cypher
+install -d -m 770 -o root -g cypher $VAR
 
 # --- config --------------------------------------------------------------------
 NEW_KEY=""
@@ -169,16 +175,36 @@ if [[ ! -f $ETC/server.json ]]; then
     TLS='"acme": { "domain": "'$DOMAIN'", "email": "'$EMAIL'", "cacheDir": "'$ETC'/acme", "httpListen": ":80" },'
     FALLBACK='{ "dir": "'$WWW'" }'
   fi
+  UPSTREAM_JSON="" ROUTING_JSON=""
+  if [[ -n $UPSTREAM ]]; then
+    UPSTREAM_JSON='"upstream": { "link": "'$UPSTREAM'" },'
+    RU='"domain:ru", "domain:xn--p1ai", "domain:su"'
+    ROUTING_JSON=',
+  "routing": {
+    "geosite": "'$VAR'/geosite.dat", "geoip": "'$VAR'/geoip.dat",
+    "geositeURL": "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat",
+    "geoipURL": "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat",
+    "rules": [
+      { "domain": ["geosite:ru-blocked"], "outbound": "exit" },
+      { "ip": ["geoip:ru-blocked"], "outbound": "exit" },
+      { "domain": ["geosite:category-ru", "geosite:ru-available-only-inside", '$RU'], "outbound": "direct" },
+      { "ip": ["geoip:ru"], "outbound": "direct" }
+    ],
+    "default": "exit"
+  }'
+  fi
   cat > $ETC/server.json <<SERVERJSON
 {
   "log": { "level": "info" },
   "server": {
     "listen": ":$PORT",
     $TLS
+    $UPSTREAM_JSON
     "users": [ { "name": "user1", "key": "$NEW_KEY" } ],
     "fallback": $FALLBACK,
-    "allowPrivate": false
-  }
+    "allowPrivate": false,
+    "e2eKeyFile": "$VAR/e2e.key"
+  }$ROUTING_JSON
 }
 SERVERJSON
   chown root:cypher $ETC/server.json
@@ -187,6 +213,9 @@ else
   log "keeping existing $ETC/server.json"
 fi
 /usr/local/bin/cypher check -c $ETC/server.json
+# Creates the end-to-end key (readable by the service) for configs that
+# predate it.
+/usr/local/bin/cypher user list -c $ETC/server.json >/dev/null
 
 # --- service ---------------------------------------------------------------------
 if [[ -f "$HERE/cypher.service" ]]; then

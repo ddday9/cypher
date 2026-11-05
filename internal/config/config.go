@@ -41,6 +41,21 @@ type ServerConfig struct {
 	Fallback FallbackConfig `json:"fallback"`
 	// AllowPrivate lets clients reach loopback/LAN addresses of the server.
 	AllowPrivate bool `json:"allowPrivate"`
+	// Upstream makes this server a relay: traffic that routing sends to
+	// "exit" (by default everything) goes to this cypher server instead of
+	// the internet, over one shared tunnel.
+	Upstream *UpstreamConfig `json:"upstream,omitempty"`
+	// E2EKeyFile holds the static key for end-to-end encrypted streams
+	// (clients that reach this server through a relay). Created if missing.
+	// Default "e2e.key" next to the config.
+	E2EKeyFile string `json:"e2eKeyFile,omitempty"`
+}
+
+// UpstreamConfig is the exit server of a relay: a link printed by
+// "cypher user add" on the exit, or the same fields as a cypher outbound.
+type UpstreamConfig struct {
+	Link string `json:"link,omitempty"`
+	OutboundConfig
 }
 
 type ACMEConfig struct {
@@ -116,6 +131,16 @@ type OutboundConfig struct {
 	// anti-freeze mode (default 8; some ISPs block after ~12 quick TLS
 	// connections to one server). Higher is faster but riskier.
 	AntiFreezeRate int `json:"antiFreezeRate,omitempty"`
+
+	// End-to-end encryption through a relay: when the server is a relay,
+	// streams that the relay passes on are encrypted for the exit, which
+	// authenticates ExitKey (a user key on the exit). ExitPublicKey is the
+	// exit's public key ("epk" in its links). The relay still sees the
+	// destination address, which its routing needs; with HideDestinations
+	// it sees nothing and sends everything to the exit.
+	ExitKey          string `json:"exitKey,omitempty"`
+	ExitPublicKey    string `json:"exitPublicKey,omitempty"`
+	HideDestinations bool   `json:"hideDestinations,omitempty"`
 }
 
 // RotationConfig controls how long a tunnel connection lives. Each value is

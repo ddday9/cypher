@@ -88,7 +88,9 @@ docker compose exec cypher cypher user revoke phone
 Сервер может сам блокировать направления для всех пользователей (или для
 одного: `inboundTag` — это имя пользователя). Действия: `direct` и `block`.
 Базы скачиваются по ссылкам и обновляются встроенным таймером — cron не
-нужен; новые файлы и изменённые правила применяются без перезапуска.
+нужен; новые файлы и изменённые правила применяются без перезапуска. Если
+ссылки не указаны, а правила используют `geosite:`/`geoip:`, базы берутся
+из [runetfreedom](https://github.com/runetfreedom/russia-v2ray-rules-dat).
 
 Добавьте в `/etc/cypher/server.json` (в томе) секцию `routing`:
 
@@ -110,6 +112,13 @@ docker compose exec cypher cypher user revoke phone
 docker run --rm -it --user 65532 -v cypher_cypher-data:/d alpine vi /d/server.json
 ```
 
+## 5a. Ретранслятор в России
+
+Тот же compose на второй ВМ в РФ, в `.env` — ещё `CYPHER_UPSTREAM` (ссылка
+пользователя на выходном сервере). Российские сайты пойдут напрямую с
+ретранслятора, остальное — через выход; клиенты могут шифровать трафик до
+выхода так, что ретранслятор его не прочитает. Подробно — [relay.md](relay.md).
+
 ## 6. Обновление
 
 ```bash
@@ -130,6 +139,7 @@ docker compose pull && docker compose up -d
 | `CYPHER_ACME_HTTP` | `:8081` (в compose) | куда nginx пересылает проверки HTTP-01 |
 | `CYPHER_FALLBACK_PROXY` | `http://nginx:8080` (в compose) | куда отправлять всех без ключа |
 | `CYPHER_ACME_DIRECTORY` | Let's Encrypt | другой ACME-сервер (например staging) |
+| `CYPHER_UPSTREAM` | — | ссылка пользователя на выходном сервере: этот сервер — ретранслятор ([relay.md](relay.md)) |
 | `CYPHER_BLOCK_RU` | `0` | `1` — сервер не ходит на российские сайты и IP, чтобы его адрес не «светился» на них (в 2026 такие IP банили) |
 
 ## Безопасность контейнеров

@@ -38,11 +38,14 @@ const (
 const (
 	CapPing      uint16 = 1 << 0
 	CapSegmented uint16 = 1 << 1
-	// CapRelay is reserved for chaining servers (a server forwarding to the
-	// next one); no server announces it yet.
+	// CapRelay: the server is a relay with an upstream exit; it accepts
+	// requests marked CmdFlagE2E and applies its routing to them.
 	CapRelay uint16 = 1 << 2
 	// CapQuietIdle: like FlagQuietIdle, from the server's side.
 	CapQuietIdle uint16 = 1 << 3
+	// CapE2E: the server is an exit that accepts end-to-end encrypted
+	// streams (CmdE2E), directly or from a relay.
+	CapE2E uint16 = 1 << 4
 )
 
 // Ext is the client's protocol extension.

@@ -119,6 +119,9 @@ func makeLink(args []string) int {
 	fp := fs.String("fp", "", "fingerprint: firefox, chrome, safari, edge, ios, random")
 	af := fs.String("af", "", "anti-freeze: auto, on, off")
 	single := fs.Bool("single", false, "strictly one connection to the server")
+	exitKey := fs.String("exit-key", "", "relay: the user's key on the exit server (end-to-end encryption)")
+	exitPub := fs.String("exit-pub", "", "relay: the exit server's public key (epk= in its links)")
+	hide := fs.Bool("hide", false, "relay: hide destinations from the relay (it cannot route them)")
 	fs.Parse(args)
 	if *server == "" || *key == "" {
 		fmt.Fprintln(os.Stderr, "usage: cypher link -server HOST:PORT -key KEY [-name NAME]")
@@ -128,7 +131,17 @@ func makeLink(args []string) int {
 		fmt.Fprintln(os.Stderr, "key:", err)
 		return 1
 	}
-	fmt.Println(links.Format(links.Link{Name: *name, Server: *server, Key: *key, ServerName: *sni, Fingerprint: *fp, AntiFreeze: *af, Single: *single}))
+	if (*exitKey == "") != (*exitPub == "") {
+		fmt.Fprintln(os.Stderr, "-exit-key and -exit-pub go together")
+		return 2
+	}
+	l := links.Link{Name: *name, Server: *server, Key: *key, ServerName: *sni, Fingerprint: *fp, AntiFreeze: *af,
+		Single: *single, ExitKey: *exitKey, ExitPublicKey: *exitPub, Hide: *hide}
+	if _, err := links.Parse(links.Format(l)); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Println(links.Format(l))
 	return 0
 }
 

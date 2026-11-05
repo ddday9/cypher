@@ -12,27 +12,24 @@ import (
 
 	"github.com/ddday9/cypher/internal/netx"
 	"github.com/ddday9/cypher/internal/protocol"
-	"github.com/xtaci/smux"
 )
 
 // udpIdleTimeout closes a UDP association after this long without packets
 // in either direction.
 var udpIdleTimeout = 2 * time.Minute
 
-// handleUDP relays datagrams between a stream and a UDP socket on the server.
-// Each packet carries its own destination, so one stream can talk to many
-// hosts (DNS, QUIC, games).
-func (s *Server) handleUDP(st *smux.Stream, user *protocol.User) {
+// handleUDP relays datagrams between a stream and the network. Each packet
+// carries its own destination, so one stream can talk to many hosts (DNS,
+// QUIC, games), and each packet is routed on its own: from a UDP socket of
+// this server, through the exit server (relay), or dropped. The status has
+// already been sent.
+func (s *Server) handleUDP(st net.Conn, user *protocol.User) {
 	pc, err := net.ListenUDP("udp", nil)
 	if err != nil {
-		st.Write([]byte{protocol.StatusFailure})
+		st.Close()
 		return
 	}
 	defer pc.Close()
-	if _, err := st.Write([]byte{protocol.StatusOK}); err != nil {
-		return
-	}
-	st.SetDeadline(time.Time{})
 	slog.Debug("udp association", "user", user.Name)
 
 	var last atomic.Int64
@@ -40,11 +37,19 @@ func (s *Server) handleUDP(st *smux.Stream, user *protocol.User) {
 	touch()
 	done := make(chan struct{})
 	var once sync.Once
+	var exitPC netx.PacketConn // opened on the first packet routed to the exit
+	var exitMu sync.Mutex
+	var exitFailed time.Time // do not retry on every packet
 	stop := func() {
 		once.Do(func() {
 			close(done)
 			pc.Close()
 			st.Close()
+			exitMu.Lock()
+			if exitPC != nil {
+				exitPC.Close()
+			}
+			exitMu.Unlock()
 		})
 	}
 	defer stop()
@@ -65,6 +70,20 @@ func (s *Server) handleUDP(st *smux.Stream, user *protocol.User) {
 		}
 	}()
 
+	// Two sources write to the stream (the local socket and the exit), and
+	// one packet must be one Write.
+	var wmu sync.Mutex
+	writeBack := func(out []byte, src netx.Destination, p []byte) ([]byte, error) {
+		frame, err := protocol.AppendPacket(out[:0], src, p)
+		if err != nil {
+			return out, nil
+		}
+		wmu.Lock()
+		_, err = st.Write(frame)
+		wmu.Unlock()
+		return frame, err
+	}
+
 	// remote → client
 	go func() {
 		defer stop()
@@ -77,15 +96,47 @@ func (s *Server) handleUDP(st *smux.Stream, user *protocol.User) {
 			}
 			touch()
 			src := netx.Destination{Network: "udp", Host: from.Addr().Unmap().String(), Port: from.Port()}
-			frame, err := protocol.AppendPacket(out[:0], src, buf[:n])
-			if err != nil {
-				continue
-			}
-			if _, err := st.Write(frame); err != nil {
+			if out, err = writeBack(out, src, buf[:n]); err != nil {
 				return
 			}
 		}
 	}()
+
+	openExit := func(dest netx.Destination) netx.PacketConn {
+		exitMu.Lock()
+		defer exitMu.Unlock()
+		if exitPC != nil {
+			return exitPC
+		}
+		if time.Since(exitFailed) < 5*time.Second {
+			return nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*dialTimeout)
+		c, err := s.exit.ListenPacket(ctx, dest)
+		cancel()
+		if err != nil {
+			slog.Debug("udp to the exit failed", "user", user.Name, "err", err)
+			exitFailed = time.Now()
+			return nil
+		}
+		exitPC = c
+		go func() { // exit → client
+			defer stop()
+			buf := make([]byte, protocol.MaxPacketSize)
+			out := make([]byte, 0, protocol.MaxPacketSize+32)
+			for {
+				n, src, err := c.ReadPacket(buf)
+				if err != nil {
+					return
+				}
+				touch()
+				if out, err = writeBack(out, src, buf[:n]); err != nil {
+					return
+				}
+			}
+		}()
+		return c
+	}
 
 	// client → remote
 	resolved := map[string]netip.Addr{}
@@ -97,14 +148,17 @@ func (s *Server) handleUDP(st *smux.Stream, user *protocol.User) {
 			return
 		}
 		touch()
-		if s.blocked(user.Name, dest) {
-			continue
+		switch s.route(user.Name, dest) {
+		case routeBlock:
+		case routeExit:
+			if c := openExit(dest); c != nil {
+				c.WritePacket(buf[:n], dest)
+			}
+		default:
+			if addr, ok := s.resolveUDP(dest, resolved); ok {
+				pc.WriteToUDPAddrPort(buf[:n], netip.AddrPortFrom(addr, dest.Port))
+			}
 		}
-		addr, ok := s.resolveUDP(dest, resolved)
-		if !ok {
-			continue
-		}
-		pc.WriteToUDPAddrPort(buf[:n], netip.AddrPortFrom(addr, dest.Port))
 	}
 }
 

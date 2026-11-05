@@ -238,7 +238,9 @@ func (c *Cypher) connectSegmented(ctx context.Context) (*link, error) {
 	}
 	go protocol.KeepAlive(ms, sess.WriteKeepAlive, func() bool { return true }, nil, 0, 0)
 	slog.Info("connected in anti-freeze mode", "outbound", c.tag, "budget", protocol.DefaultBudget)
-	return &link{sess: ms, seg: sess}, nil
+	l := &link{sess: ms, seg: sess}
+	l.caps.Store(uint32(caps))
+	return l, nil
 }
 
 // carrierDialer opens the next carriers of a session, one at a time, for as

@@ -222,7 +222,7 @@ function serverRow(p) {
     el("span", { class: "radio" }),
     el("div", { class: "server-main" },
       el("div", { class: "server-name" }, p.name),
-      el("div", { class: "server-host" }, p.server)),
+      el("div", { class: "server-host" }, p.server + (p.exitKey && p.exitPublicKey ? " · через ретранслятор, сквозное шифрование" : ""))),
     pingBadge(state.pings[p.id]),
     el("button", { class: "icon-btn", title: "Скопировать ссылку", onclick: async (e) => {
       e.stopPropagation();

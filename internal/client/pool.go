@@ -424,6 +424,33 @@ type link struct {
 	seg  *protocol.Session    // anti-freeze tunnels (carried by many connections)
 	caps atomic.Uint32        // server capabilities from HELLO; 0 = protocol v1 server
 	pong atomic.Uint32        // id of the last PONG received
+
+	hello     chan struct{} // closed on HELLO, or helloWait after connecting
+	helloOnce sync.Once
+}
+
+// helloWait: a server that sends no HELLO within this time is protocol v1.
+var helloWait = 3 * time.Second
+
+func newLink() *link {
+	l := &link{hello: make(chan struct{})}
+	time.AfterFunc(helloWait, l.helloDone)
+	return l
+}
+
+func (l *link) helloDone() { l.helloOnce.Do(func() { close(l.hello) }) }
+
+// serverCaps waits for the server's HELLO (at most helloWait after the
+// connection was made) and returns its capabilities. Only features that
+// need to know them before the first request wait.
+func (l *link) serverCaps(ctx context.Context) uint16 {
+	if l.hello != nil {
+		select {
+		case <-l.hello:
+		case <-ctx.Done():
+		}
+	}
+	return uint16(l.caps.Load())
 }
 
 // Freeze detection (protocol v2 servers): a censor that "freezes" a

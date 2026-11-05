@@ -19,7 +19,8 @@ make linux windows
 ## 2. Сервер (Linux)
 
 **Рекомендуемый способ — Docker:** см. [docker.md](docker.md). Ниже —
-установка без Docker, как служба systemd.
+установка без Docker, как служба systemd. Ретранслятор в России перед
+зарубежным сервером — [relay.md](relay.md).
 
 ### Быстро: скрипт
 
@@ -83,10 +84,11 @@ journalctl -u cypher -f
 
 1. Создайте папку, например `C:\cypher`, положите туда
    `cypher-windows-amd64.exe` (можно переименовать в `cypher.exe`).
-2. Скачайте `geosite.dat` и `geoip.dat` — те же, что для Xray, например из
-   [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat/releases)
-   или [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat/releases),
-   и положите рядом.
+2. Базы `geosite.dat` и `geoip.dat` скачаются сами при первом запуске из
+   [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat/releases)
+   (если правила используют `geosite:`/`geoip:`). Другой источник —
+   `geositeURL`/`geoipURL` в секции `routing`; свои файлы без обновлений —
+   положите рядом и укажите `"geositeURL": "none"`, `"geoipURL": "none"`.
 3. Скопируйте `examples/client.json` в `C:\cypher\client.json`, впишите
    `server` (`example.com:443`) и тот же `key`, что на сервере.
 4. Проверьте конфиг и запустите:
@@ -192,9 +194,9 @@ systemd-resolved, cypher направляет все DNS-запросы в TUN �
 
 ## Базы geosite/geoip по ссылкам
 
-В секции `routing` клиента (и сервера) можно указать, откуда брать базы.
-Если файла нет — он скачивается при запуске; дальше обновляется встроенным
-таймером (cron не нужен):
+В секции `routing` клиента (и сервера) можно указать, откуда брать базы
+(по умолчанию — runetfreedom). Если файла нет — он скачивается при запуске;
+дальше обновляется встроенным таймером (cron не нужен):
 
 ```json
 "routing": {

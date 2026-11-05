@@ -27,6 +27,14 @@ type Preset struct {
 	ID, Name, Geosite, Geoip, Note string
 }
 
+// The default sources (runetfreedom: v2fly categories plus Russian lists
+// such as ru-blocked) for configs that use geosite:/geoip: rules without
+// naming a source.
+const (
+	DefaultGeositeURL = "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat"
+	DefaultGeoipURL   = "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat"
+)
+
 var Presets = []Preset{
 	{ID: "runetfreedom", Name: "runetfreedom (Россия)",
 		Geosite: "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat",

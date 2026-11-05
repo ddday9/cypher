@@ -33,7 +33,7 @@ func (s *Server) handleSegmented(rc *protocol.RecordConn, user *protocol.User, e
 	}
 
 	sess := protocol.NewSession(ext.Session, protocol.DefaultBudget)
-	if err := rc.WriteControl(protocol.CtlHello, protocol.Hello(serverCaps)); err != nil {
+	if err := rc.WriteControl(protocol.CtlHello, protocol.Hello(s.caps)); err != nil {
 		rc.Close()
 		return
 	}
