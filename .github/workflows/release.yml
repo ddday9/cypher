@@ -75,6 +75,34 @@ jobs:
           make gui VERSION="$VERSION"
           cp bin/nevio.exe "dist/nevio-windows-amd64.exe"
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android client
+        env:
+          NEVIO_KEYSTORE_B64: ${{ secrets.NEVIO_KEYSTORE_B64 }}
+          NEVIO_KEYSTORE_PASSWORD: ${{ secrets.NEVIO_KEYSTORE_PASSWORD }}
+          NEVIO_KEY_ALIAS: ${{ secrets.NEVIO_KEY_ALIAS }}
+          NEVIO_KEY_PASSWORD: ${{ secrets.NEVIO_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          gomobile init
+          if [ -n "$NEVIO_KEYSTORE_B64" ]; then
+            echo "$NEVIO_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export NEVIO_KEYSTORE="$RUNNER_TEMP/release.keystore"
+          else
+            unset NEVIO_KEYSTORE_PASSWORD NEVIO_KEY_ALIAS NEVIO_KEY_PASSWORD
+            echo "::warning::no NEVIO_KEYSTORE_B64 secret: the APK is signed with a temporary debug key, updates need a reinstall (android/signing/README.md)"
+          fi
+          make android VERSION="$VERSION"
+          cp bin/nevio-android.apk dist/nevio-android.apk
+
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
 
@@ -87,6 +115,9 @@ jobs:
           cat > notes.md <<NOTES
           ## nevio — клиент для Windows
           \`nevio-windows-amd64.exe\` — графический клиент (Wintun встроен). Положите в отдельную папку и запустите.
+
+          ## nevio для Android
+          \`nevio-android.apk\` — Android 8.0+. Установка и скрытность VPN от других приложений: [docs/android.md](https://github.com/$GITHUB_REPOSITORY/blob/$VERSION/docs/android.md).
 
           ## Сервер в Docker
           \`\`\`

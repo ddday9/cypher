@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -35,6 +36,33 @@ const (
 	socksRepAtypUnsupported = 8
 )
 
+// socksAuth checks RFC 1929 credentials: VER(1) ULEN UNAME PLEN PASSWD.
+func (in *Inbound) socksAuth(conn net.Conn) bool {
+	var b [2]byte
+	if _, err := io.ReadFull(conn, b[:]); err != nil || b[0] != 1 {
+		return false
+	}
+	user := make([]byte, b[1])
+	if _, err := io.ReadFull(conn, user); err != nil {
+		return false
+	}
+	if _, err := io.ReadFull(conn, b[:1]); err != nil {
+		return false
+	}
+	pass := make([]byte, b[0])
+	if _, err := io.ReadFull(conn, pass); err != nil {
+		return false
+	}
+	ok := subtle.ConstantTimeCompare(user, []byte(in.user)) == 1 &&
+		subtle.ConstantTimeCompare(pass, []byte(in.pass)) == 1
+	status := byte(1)
+	if ok {
+		status = 0
+	}
+	conn.Write([]byte{1, status})
+	return ok
+}
+
 func (in *Inbound) handleSOCKS(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	ctx = netx.WithSource(ctx, "tcp", netx.AddrPortOf(conn.RemoteAddr()))
@@ -49,17 +77,24 @@ func (in *Inbound) handleSOCKS(ctx context.Context, conn net.Conn) {
 	if _, err := io.ReadFull(conn, methods); err != nil {
 		return
 	}
-	noAuth := false
+	want := byte(0) // no authentication
+	if in.user != "" || in.pass != "" {
+		want = 2 // user name and password
+	}
+	offered := false
 	for _, m := range methods {
-		if m == 0 {
-			noAuth = true
+		if m == want {
+			offered = true
 		}
 	}
-	if !noAuth {
+	if !offered {
 		conn.Write([]byte{socksVersion, 0xff})
 		return
 	}
-	if _, err := conn.Write([]byte{socksVersion, 0}); err != nil {
+	if _, err := conn.Write([]byte{socksVersion, want}); err != nil {
+		return
+	}
+	if want == 2 && !in.socksAuth(conn) {
 		return
 	}
 

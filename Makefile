@@ -41,3 +41,25 @@ gui-icon:
 gui: $(WINTUN_DLL)
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -tags wintun \
 		-ldflags "$(LDFLAGS) -H windowsgui" -o bin/nevio.exe ./cmd/nevio
+
+# --- Android client ------------------------------------------------------------
+# Needs the Android SDK and NDK (ANDROID_HOME, ANDROID_NDK_HOME) and gomobile:
+#   go install golang.org/x/mobile/cmd/gomobile@latest && gomobile init
+ANDROID_APP_ID ?= net.nevio.app
+ANDROID_APP_NAME ?= nevio
+ANDROID_AAR := android/app/libs/nevio.aar
+
+.PHONY: android android-aar
+
+android-aar:
+	mkdir -p android/app/libs
+	gomobile bind -target=android/arm64,android/arm,android/amd64 -androidapi 26 \
+		-javapkg net.nevio.core -trimpath -ldflags "-s -w" -o $(ANDROID_AAR) ./mobile
+
+# bin/nevio-android.apk; ANDROID_APP_ID / ANDROID_APP_NAME change the package
+# name and the visible name (see docs/android.md, «Скрытность»).
+android: android-aar
+	mkdir -p bin
+	cd android && ./gradlew --no-daemon assembleRelease -PappVersion=$(VERSION:v%=%) \
+		-PappId=$(ANDROID_APP_ID) -PappName="$(ANDROID_APP_NAME)"
+	cp android/app/build/outputs/apk/release/app-release.apk bin/nevio-android.apk

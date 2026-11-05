@@ -60,8 +60,9 @@ func Name(path string) string {
 
 // Process is a running program, for the picker in the interface.
 type Process struct {
-	Name string `json:"name"`
-	Path string `json:"path,omitempty"`
+	Name  string `json:"name"`
+	Path  string `json:"path,omitempty"`
+	Label string `json:"label,omitempty"` // Android: the app's name (Name is its package)
 }
 
 // List returns running programs, one entry per executable name.

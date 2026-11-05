@@ -195,3 +195,10 @@ details.card textarea { width: 100%; margin-top: 8px; background: var(--bg2); bo
 .pick + .pick { border-top: 1px solid var(--line); }
 
 .af-badge { margin-top: 8px; font-size: 12px; color: var(--warn); background: #f2b84b14; border: 1px solid #f2b84b44; padding: 3px 10px; border-radius: 99px; }
+
+/* Android */
+.proxy-card { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.proxy-card .mono { word-break: break-all; font-size: 13px; }
+.proxy-card .row { display: flex; gap: 8px; }
+#ruAppsList { font-size: 12px; line-height: 1.5; word-break: break-word; padding: 8px 12px; }
+.pick small { color: var(--muted); font-size: 11px; }

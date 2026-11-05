@@ -16,3 +16,5 @@ var errUnsupported = errors.New("TUN mode is supported on Linux and Windows only
 func configure(wgtun.Device, Options) (func(), error) { return nil, errUnsupported }
 
 func defaultInterface(string) (*netx.Interface, error) { return nil, errUnsupported }
+
+func createFromFD(int) (wgtun.Device, string, error) { return nil, "", errUnsupported }

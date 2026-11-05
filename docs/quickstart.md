@@ -163,6 +163,12 @@ docker compose exec cypher cypher user add phone -exit 'ССЫЛКА_PHONE_ВЫ�
 Готово. Весь трафик системы, включая игры: на главной переключите режим на
 **Весь трафик (TUN)** (nevio попросит права администратора).
 
+**На Android** — то же самое: скачайте `nevio-android.apk` со страницы
+[Releases](https://github.com/ddday9/cypher/releases/latest), установите,
+вставьте ту же ссылку и подключитесь (Android спросит разрешение на VPN).
+Банки и госприложения по умолчанию идут мимо VPN и его не видят —
+[android.md](android.md).
+
 ---
 
 ## Вариант Б: без ретранслятора

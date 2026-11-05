@@ -31,6 +31,8 @@ type Inbound struct {
 	handler func(ctx context.Context, conn net.Conn)
 	tun     *tunInbound
 	d       Dispatcher
+
+	user, pass string // socks authentication, if set
 }
 
 // Type returns the inbound type ("socks", "http", "tun").
@@ -38,7 +40,8 @@ func (in *Inbound) Type() string { return in.typ }
 
 // New creates an inbound from config.
 func New(cfg config.InboundConfig, d Dispatcher) (*Inbound, error) {
-	in := &Inbound{tag: cfg.Tag, typ: strings.ToLower(cfg.Type), listen: cfg.Listen, d: d}
+	in := &Inbound{tag: cfg.Tag, typ: strings.ToLower(cfg.Type), listen: cfg.Listen, d: d,
+		user: cfg.Username, pass: cfg.Password}
 	switch in.typ {
 	case "socks", "socks5":
 		in.handler = in.handleSOCKS

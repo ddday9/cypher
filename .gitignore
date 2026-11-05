@@ -6,3 +6,12 @@ bin/
 cmd/nevio/assets/wintun.dll
 cmd/nevio/*.syso
 *.pid
+android/.gradle/
+android/build/
+android/app/build/
+android/app/libs/
+android/local.properties
+android/keystore.properties
+*.jks
+release.keystore
+*.keystore

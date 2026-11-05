@@ -56,7 +56,15 @@ type Settings struct {
 	AntiFreeze     string    `json:"antiFreeze,omitempty"`     // auto (default), on, off; overrides profiles
 	AntiFreezeRate int       `json:"antiFreezeRate,omitempty"` // new connections per 10 s in anti-freeze mode
 	Single         bool      `json:"single,omitempty"`         // strictly one connection; overrides profiles
-	LogLevel       string    `json:"logLevel"`
+
+	// Android only (see mobile.go).
+	MobileInit bool   `json:"mobileInit,omitempty"` // Android defaults applied
+	HideRuApps bool   `json:"hideRuApps,omitempty"` // keep RussianApps out of the VPN
+	AppScope   string `json:"appScope,omitempty"`   // "" = all apps except "direct" ones; "selected" = only "proxy" apps
+	ProxyPort  int    `json:"proxyPort,omitempty"`  // proxy mode: SOCKS5 port on 127.0.0.1
+	ProxyUser  string `json:"proxyUser,omitempty"`
+	ProxyPass  string `json:"proxyPass,omitempty"`
+	LogLevel   string `json:"logLevel"`
 }
 
 func defaultSettings() Settings {

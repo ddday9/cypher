@@ -87,6 +87,10 @@ type InboundConfig struct {
 	Tag    string `json:"tag"`
 	Type   string `json:"type"`             // socks, http, tun
 	Listen string `json:"listen,omitempty"` // socks/http: 127.0.0.1:10808
+	// socks: require this user name and password (RFC 1929). Without them
+	// the proxy accepts anyone who can reach it.
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
 
 	// tun: capture all traffic of the system.
 	Name      string   `json:"name,omitempty"`      // interface name, default "cypher"
@@ -102,6 +106,9 @@ type InboundConfig struct {
 	// Sniff reads the domain from TLS SNI / HTTP Host so that domain rules
 	// (geosite) work for connections made by IP. Default true.
 	Sniff *bool `json:"sniff,omitempty"`
+	// FD is an already configured TUN file descriptor (Android VpnService);
+	// addresses, routes and DNS are then set by the system, not by cypher.
+	FD int `json:"fd,omitempty"`
 }
 
 type OutboundConfig struct {

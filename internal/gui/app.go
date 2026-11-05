@@ -58,6 +58,11 @@ func NewApp(dir string, logOut io.Writer) (*App, error) {
 		http:  &http.Client{Timeout: 5 * time.Minute},
 		pings: map[string]int{},
 	}
+	if IsMobile() {
+		if err := store.Update(func(st *State) error { ensureMobileDefaults(st); return nil }); err != nil {
+			return nil, err
+		}
+	}
 	a.setLogLevel(store.Get().Settings.LogLevel)
 	a.recoverSystemProxy()
 	return a, nil
@@ -221,7 +226,7 @@ func (a *App) Connect(ctx context.Context) error {
 		return err
 	}
 	s := st.Settings
-	if s.Mode == "tun" && !isElevated() {
+	if s.Mode == "tun" && !isElevated() && !IsMobile() {
 		return ErrNeedElevation
 	}
 	cfg := a.BuildConfig(p, s)
@@ -236,10 +241,33 @@ func (a *App) Connect(ctx context.Context) error {
 	a.restoreSystemProxy()
 	a.setBusy("Подключаюсь…")
 	defer a.setBusy("")
+	m := getMobile()
+	if m != nil {
+		// The new VPN is set up before the old one goes (engine.Start stops
+		// the running client), so apps never fall out of the VPN meanwhile.
+		cfg.Routing.Rules = withoutProcessRules(cfg.Routing.Rules)
+		in, err := mobileInbounds(m, s)
+		if err != nil {
+			a.engine.Stop()
+			m.CloseTUN()
+			return err
+		}
+		cfg.Inbounds = in
+	}
 	if err := a.engine.Start(cfg); err != nil {
+		if m != nil {
+			closeTUNFD(cfg.Inbounds)
+			m.CloseTUN()
+		}
 		return humanError(err)
 	}
-	if s.Mode != "tun" && s.SystemProxy {
+	if m != nil {
+		if s.Mode != "tun" {
+			m.CloseTUN() // switched from VPN to proxy mode
+		}
+		m.KeepAlive(s.Mode != "tun")
+	}
+	if s.Mode != "tun" && s.SystemProxy && m == nil {
 		if err := a.enableSystemProxy("127.0.0.1:" + strconv.Itoa(s.HTTPPort)); err != nil && !errors.Is(err, sysproxy.ErrUnsupported) {
 			slog.Warn("system proxy", "err", err)
 		}
@@ -265,6 +293,10 @@ func humanError(err error) error {
 // Disconnect stops the client and restores the system proxy.
 func (a *App) Disconnect() {
 	a.engine.Stop()
+	if m := getMobile(); m != nil {
+		m.CloseTUN()
+		m.KeepAlive(false)
+	}
 	a.restoreSystemProxy()
 	a.mu.Lock()
 	a.activeID = ""
@@ -466,11 +498,15 @@ type Info struct {
 	DataDir    string       `json:"dataDir"`
 	Presets    []Preset     `json:"presets"`
 	GeoSources []geo.Preset `json:"geoSources"`
+	// Android: the UI shows VPN/proxy modes and the list of apps kept out
+	// of the VPN by default.
+	Mobile      bool     `json:"mobile,omitempty"`
+	RussianApps []string `json:"russianApps,omitempty"`
 }
 
 func (a *App) Info(version string) Info {
-	return Info{Version: version, OS: runtime.GOOS, Elevated: isElevated(), DataDir: a.dir,
-		Presets: Presets, GeoSources: geo.Presets}
+	return Info{Version: version, OS: runtime.GOOS, Elevated: isElevated() || IsMobile(), DataDir: a.dir,
+		Presets: Presets, GeoSources: geo.Presets, Mobile: IsMobile(), RussianApps: RussianApps}
 }
 
 // localAddr reports whether a TCP port on 127.0.0.1 is free.

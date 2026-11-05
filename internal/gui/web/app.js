@@ -10,7 +10,43 @@ let logNext = 0;
 
 // --- API ---------------------------------------------------------------------
 
+// Android: the page talks to nevio through a JavaScript bridge, in process
+// (there is no local HTTP server another app could find).
+const bridge = window.NevioAndroid;
+let bridgeSeq = 0;
+const bridgePending = {};
+window.__nevioReply = (id, json) => {
+  const done = bridgePending[id];
+  delete bridgePending[id];
+  if (done) done(json);
+};
+function bridgeCall(method, path, body) {
+  return new Promise((resolve) => {
+    const id = ++bridgeSeq;
+    bridgePending[id] = resolve;
+    bridge.call(id, method, path, body);
+  });
+}
+
+async function copyText(text) {
+  if (bridge) { bridge.copy(text); return; }
+  await navigator.clipboard.writeText(text);
+}
+async function pasteText() {
+  if (bridge) return bridge.paste();
+  return navigator.clipboard.readText();
+}
+
 async function api(path, body) {
+  if (bridge) {
+    const env = JSON.parse(await bridgeCall(body === undefined ? "GET" : "POST", "/api/" + path, body === undefined ? "" : JSON.stringify(body)));
+    if (env.status >= 400) {
+      const e = new Error((env.body && env.body.error) || "ошибка " + env.status);
+      e.code = env.body && env.body.code;
+      throw e;
+    }
+    return env.body;
+  }
   const opts = { method: body === undefined ? "GET" : "POST", headers: { "X-Cypher-Token": token } };
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
@@ -166,7 +202,8 @@ function renderHome() {
   const set = s.data.settings;
   document.querySelectorAll(".seg").forEach((b) => b.classList.toggle("active", b.dataset.mode === set.mode));
   const chip = $("modeChip");
-  chip.textContent = s.status === "connected" ? (s.mode === "tun" ? "TUN" : "Прокси") : "выключено";
+  chip.textContent = s.status === "connected" ? (s.mode === "tun" ? (info.mobile ? "VPN" : "TUN") : "Прокси") : "выключено";
+  if (info.mobile) renderProxyCard(set);
   chip.classList.toggle("on", s.status === "connected");
 
   const profiles = s.data.profiles || [];
@@ -185,6 +222,62 @@ function renderHome() {
   if (s.status === "connected") $("banner").classList.add("hidden");
 }
 
+// --- Android ---------------------------------------------------------------------------
+
+function proxyLink(set) {
+  const q = new URLSearchParams({ server: "127.0.0.1", port: String(set.proxyPort), user: set.proxyUser, pass: set.proxyPass });
+  return "tg://socks?" + q.toString();
+}
+
+function renderProxyCard(set) {
+  const show = set.mode !== "tun";
+  $("proxyCard").classList.toggle("hidden", !show);
+  if (!show) return;
+  $("proxyAddr").textContent = `127.0.0.1:${set.proxyPort} · логин ${set.proxyUser} · пароль ${set.proxyPass}`;
+  $("proxyTg").href = proxyLink(set);
+}
+
+$("proxyCopy").addEventListener("click", async () => {
+  const set = state.data.settings;
+  await copyText(`socks5://${set.proxyUser}:${set.proxyPass}@127.0.0.1:${set.proxyPort}`).catch(() => {});
+  toast("Адрес прокси скопирован");
+});
+
+$("ruAppsShow").addEventListener("click", (e) => {
+  e.preventDefault();
+  const box = $("ruAppsList");
+  box.textContent = info.russianApps.join(", ");
+  box.classList.toggle("hidden");
+});
+
+let appLabels = {};
+async function loadAppLabels() {
+  const apps = await api("processes").catch(() => []);
+  appLabels = Object.fromEntries(apps.map((a) => [a.name, a.label || a.name]));
+  return apps;
+}
+
+function setupMobile() {
+  document.body.classList.add("mobile");
+  for (const id of ["sysProxy", "socksPort", "httpPort", "autostart"]) {
+    const item = $(id).closest(".item");
+    if (item) item.classList.add("hidden");
+  }
+  $("stealthBox").classList.remove("hidden");
+  document.querySelector('.seg[data-mode="proxy"]').textContent = "Прокси (без VPN)";
+  document.querySelector('.seg[data-mode="tun"]').textContent = "VPN";
+  $("appsHint").textContent = "«Мимо VPN» — приложение не видит VPN и ходит в интернет напрямую. Добавьте сюда банки и госприложения, которых нет в списке выше.";
+  $("pickerSearch").placeholder = "Поиск по названию или имени пакета";
+  if (bridge) {
+    $("disguise").value = bridge.icon();
+    $("disguise").addEventListener("change", () => {
+      bridge.setIcon($("disguise").value);
+      toast("Значок изменён");
+    });
+  }
+  loadAppLabels();
+}
+
 // --- servers ---------------------------------------------------------------------------
 
 $("importBtn").addEventListener("click", (e) => busy(e.target, async () => {
@@ -198,7 +291,7 @@ $("importBtn").addEventListener("click", (e) => busy(e.target, async () => {
 
 $("pasteBtn").addEventListener("click", async () => {
   try {
-    $("importText").value = await navigator.clipboard.readText();
+    $("importText").value = await pasteText();
   } catch {
     $("importText").focus();
     toast("Вставьте ссылку в поле (Ctrl+V)");
@@ -228,7 +321,7 @@ function serverRow(p) {
       e.stopPropagation();
       try {
         const r = await api("profile/share", { id: p.id });
-        await navigator.clipboard.writeText(r.link);
+        await copyText(r.link);
         toast("Ссылка скопирована");
       } catch (err) { handleError(err); }
     } }, "⧉"),
@@ -318,6 +411,11 @@ function fillSettings() {
   $("autostart").checked = draft.autostart;
   $("autoConnect").checked = draft.autoConnect;
   $("logLevel").value = draft.logLevel || "info";
+  if (info.mobile) {
+    $("hideRuApps").checked = !!draft.hideRuApps;
+    $("appScope").value = draft.appScope || "";
+    $("proxyPort").value = draft.proxyPort;
+  }
   $("about").textContent = `nevio ${info.version} · протокол cypher · данные: ${info.dataDir}`;
   settingsDirty = false;
 }
@@ -333,16 +431,20 @@ function renderPresets() {
   $("defaultBox").classList.toggle("hidden", draft.routing !== "custom");
 }
 
+const APP_ACTIONS_MOBILE = [["direct", "Мимо VPN"], ["proxy", "Через VPN"]];
+
 function renderApps() {
   const apps = draft.userRules.map((r, i) => [r, i]).filter(([r]) => r.type === "process");
   if (!apps.length) {
-    $("appList").replaceChildren(el("div", { class: "empty-row" }, "Например, dota2.exe — напрямую, чтобы игра шла без VPN."));
+    $("appList").replaceChildren(el("div", { class: "empty-row" }, info.mobile
+      ? "Например, банк — «Мимо VPN»: он не увидит VPN."
+      : "Например, dota2.exe — напрямую, чтобы игра шла без VPN."));
     return;
   }
   $("appList").replaceChildren(...apps.map(([r, i]) => el("div", { class: "app" },
-    el("span", { class: "app-icon" }, (r.value[0] || "?")),
-    el("span", { class: "app-name", title: r.value }, r.value),
-    select(ACTIONS, r.action, (v) => { r.action = v; }),
+    el("span", { class: "app-icon" }, ((appLabels[r.value] || r.value)[0] || "?")),
+    el("span", { class: "app-name", title: r.value }, appLabels[r.value] || r.value),
+    select(info.mobile ? APP_ACTIONS_MOBILE : ACTIONS, r.action, (v) => { r.action = v; }),
     el("button", { class: "icon-btn", title: "Убрать", onclick: () => { draft.userRules.splice(i, 1); settingsDirty = true; renderApps(); } }, "✕"))));
 }
 
@@ -386,16 +488,17 @@ function addApp(name) {
 }
 function renderPicker() {
   const q = $("pickerSearch").value.trim().toLowerCase();
-  const list = processes.filter((p) => !q || p.name.toLowerCase().includes(q)).slice(0, 200);
+  const list = processes.filter((p) => !q || p.name.toLowerCase().includes(q) || (p.label || "").toLowerCase().includes(q)).slice(0, 300);
   $("pickerList").replaceChildren(...(list.length ? list.map((p) => el("div", { class: "pick", onclick: () => addApp(p.name) },
-    el("span", { class: "app-icon" }, p.name[0] || "?"), el("span", {}, p.name)))
-    : [el("div", { class: "empty-row" }, "Не найдено среди запущенных — добавьте по имени файла.")]));
+    el("span", { class: "app-icon" }, (p.label || p.name)[0] || "?"),
+    el("span", {}, p.label || p.name, p.label ? el("small", {}, " " + p.name) : "")))
+    : [el("div", { class: "empty-row" }, info.mobile ? "Не найдено — добавьте по имени пакета." : "Не найдено среди запущенных — добавьте по имени файла.")]));
 }
 $("addAppBtn").addEventListener("click", async () => {
   $("pickerSearch").value = "";
   $("picker").classList.remove("hidden");
   $("pickerSearch").focus();
-  processes = await api("processes").catch(() => []);
+  processes = info.mobile ? await loadAppLabels() : await api("processes").catch(() => []);
   renderPicker();
 });
 $("pickerSearch").addEventListener("input", renderPicker);
@@ -448,6 +551,11 @@ $("saveBtn").addEventListener("click", (e) => busy(e.target, async () => {
   s.autoConnect = $("autoConnect").checked;
   s.logLevel = $("logLevel").value;
   s.mode = state.data.settings.mode;
+  if (info.mobile) {
+    s.hideRuApps = $("hideRuApps").checked;
+    s.appScope = $("appScope").value;
+    s.proxyPort = Number($("proxyPort").value);
+  }
   await api("settings", s);
   settingsDirty = false;
   toast(state.status === "connected" ? "Сохранено, переподключаюсь" : "Сохранено");
@@ -481,7 +589,7 @@ async function pollLogs(force) {
 }
 
 $("copyLogs").addEventListener("click", async () => {
-  await navigator.clipboard.writeText($("logBox").innerText).catch(() => {});
+  await copyText($("logBox").innerText).catch(() => {});
   toast("Логи скопированы");
 });
 
@@ -499,6 +607,7 @@ async function refresh() {
 
 async function main() {
   info = await api("info");
+  if (info.mobile) setupMobile();
   await refresh();
   setInterval(refresh, 1000);
   setInterval(pollLogs, 1000);

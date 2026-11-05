@@ -35,7 +35,7 @@ type tunInbound struct {
 
 func newTUN(in *Inbound, cfg config.InboundConfig) (*tunInbound, error) {
 	t := &tunInbound{in: in, sniff: cfg.Sniff == nil || *cfg.Sniff}
-	o := tun.Options{Name: cfg.Name, MTU: cfg.MTU, AutoRoute: cfg.AutoRoute == nil || *cfg.AutoRoute}
+	o := tun.Options{Name: cfg.Name, MTU: cfg.MTU, AutoRoute: cfg.AutoRoute == nil || *cfg.AutoRoute, FD: cfg.FD}
 	if o.Name == "" {
 		o.Name = "cypher"
 	}

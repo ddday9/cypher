@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="alias_notes">Заметки</string>
+    <string name="alias_calc">Калькулятор</string>
+    <string name="vpn_session">Сеть</string>
+    <string name="keepalive_channel">Работа в фоне</string>
+    <string name="keepalive_text">Работает в фоне</string>
+</resources>

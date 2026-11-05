@@ -103,3 +103,7 @@ func defaultInterface(skip string) (*netx.Interface, error) {
 	}
 	return &netx.Interface{Name: name, Index: int(best.InterfaceIndex)}, nil
 }
+
+func createFromFD(int) (wgtun.Device, string, error) {
+	return nil, "", errors.New("a TUN file descriptor is only used on Android")
+}

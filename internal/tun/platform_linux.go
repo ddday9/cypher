@@ -101,3 +101,5 @@ func defaultInterface(skip string) (*netx.Interface, error) {
 	}
 	return &netx.Interface{Name: link.Attrs().Name, Index: best.LinkIndex}, nil
 }
+
+func createFromFD(fd int) (wgtun.Device, string, error) { return wgtun.CreateUnmonitoredTUNFromFD(fd) }

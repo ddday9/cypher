@@ -39,6 +39,13 @@
         <button data-mode="tun" class="seg">Весь трафик (TUN)</button>
       </div>
 
+      <div id="proxyCard" class="card proxy-card hidden">
+        <div class="label">Прокси для приложений (без VPN)</div>
+        <div class="mono" id="proxyAddr"></div>
+        <small class="hint-inline">SOCKS5 с паролем. Укажите его в приложении, например в Telegram: Настройки → Данные и память → Прокси.</small>
+        <div class="row"><a id="proxyTg" class="btn primary small" href="#">Открыть в Telegram</a><button id="proxyCopy" class="btn ghost small">Скопировать</button></div>
+      </div>
+
       <button id="serverCard" class="card server-card">
         <div class="server-main">
           <div class="label">Сервер</div>
@@ -86,10 +93,24 @@
           <select id="defaultAction"><option value="proxy">Через VPN</option><option value="direct">Напрямую</option></select></label>
       </div>
 
+      <div id="stealthBox" class="hidden">
+        <h3>Скрытность VPN</h3>
+        <div class="card list">
+          <label class="item"><span>Скрывать VPN от российских приложений<small>Госуслуги, банки, маркетплейсы, операторы, VK, MAX и другие идут мимо VPN: для них VPN не включён, и они видят ваш обычный IP. <a href="#" id="ruAppsShow">Список</a></small></span><input type="checkbox" id="hideRuApps" class="switch"></label>
+          <div id="ruAppsList" class="item-details hidden mono small"></div>
+          <label class="item"><span>Через VPN идут<small>«Только выбранные» — в VPN попадают только приложения с действием «Через VPN»; остальные его не видят</small></span>
+            <select id="appScope"><option value="">все приложения, кроме «Мимо VPN»</option><option value="selected">только выбранные приложения</option></select></label>
+          <label class="item"><span>Значок и название<small>Как nevio выглядит на рабочем столе. Меняется сразу; лаунчер может обновить значок через несколько секунд</small></span>
+            <select id="disguise"><option value="default">nevio</option><option value="notes">Заметки</option><option value="calc">Калькулятор</option></select></label>
+          <label class="item"><span>Порт прокси<small>Для режима «Прокси (без VPN)»; логин и пароль создаются сами</small></span><input type="number" id="proxyPort" min="1024" max="65535"></label>
+        </div>
+        <small class="hint">Что видно другим приложениям и как спрятаться лучше — в документации, раздел «Android: скрытность».</small>
+      </div>
+
       <h3>Приложения</h3>
       <div class="card list">
         <div id="appList"></div>
-        <div class="item"><span class="hint-inline">Работает в режиме «Весь трафик». В режиме «Прокси» — только для программ, которые сами ходят через прокси.</span></div>
+        <div class="item"><span class="hint-inline" id="appsHint">Работает в режиме «Весь трафик». В режиме «Прокси» — только для программ, которые сами ходят через прокси.</span></div>
         <div class="item end"><button id="addAppBtn" class="btn ghost small">+ Добавить приложение</button></div>
       </div>
 

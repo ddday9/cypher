@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -12,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +35,9 @@ type Server struct {
 	token   string
 	ln      net.Listener
 	srv     *http.Server
+	// inProcess: requests come through Call only (Android), never from
+	// the network, so the token and Host checks do not apply.
+	inProcess bool
 
 	// OnShow is called when another instance asks this one to show its window.
 	OnShow func()
@@ -52,6 +57,39 @@ func NewServer(app *App, version string) (*Server, error) {
 	s.srv = &http.Server{Handler: s.routes(), ReadHeaderTimeout: 10 * time.Second}
 	go s.srv.Serve(ln)
 	return s, nil
+}
+
+// NewInProcessServer serves the API without a network listener (Android:
+// the app's WebView calls Call through a JavaScript bridge, so no local
+// port exists that other apps could find).
+func NewInProcessServer(app *App, version string) *Server {
+	s := &Server{app: app, version: version, inProcess: true}
+	s.srv = &http.Server{Handler: s.routes()}
+	return s
+}
+
+// Call runs one API request in process and returns the status and body.
+func (s *Server) Call(method, path string, body []byte) (int, []byte) {
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	if len(body) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	rec := httptest.NewRecorder()
+	s.srv.Handler.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.Bytes()
+}
+
+// Asset returns an embedded UI file ("" if missing).
+func Asset(path string) []byte {
+	path = strings.TrimPrefix(path, "/")
+	if path == "" {
+		path = "index.html"
+	}
+	b, err := webFS.ReadFile("web/" + path)
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // URL opens the UI; the token travels in the fragment, never in requests.
@@ -99,6 +137,10 @@ func (s *Server) routes() http.Handler {
 // from another origin cannot add without a CORS preflight we never allow.
 func (s *Server) guard(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.inProcess {
+			h(w, r)
+			return
+		}
 		if r.Host != s.ln.Addr().String() {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
@@ -346,6 +388,14 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if in.AppScope != "" && in.AppScope != "selected" {
+		writeErr(w, errors.New("неизвестный режим приложений"))
+		return
+	}
+	if IsMobile() && (in.ProxyPort < 1024 || in.ProxyPort > 65535) {
+		writeErr(w, errors.New("порт прокси — число от 1024 до 65535"))
+		return
+	}
 	switch in.Fingerprint {
 	case "", "link", "firefox", "chrome", "safari", "edge", "ios", "android", "random":
 	default:
@@ -424,6 +474,10 @@ func (s *Server) updateGeo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) processes(w http.ResponseWriter, r *http.Request) {
+	if m := getMobile(); m != nil {
+		writeJSON(w, mobileApps(m))
+		return
+	}
 	ps, err := procinfo.List()
 	if err != nil {
 		writeErr(w, err)

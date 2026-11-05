@@ -20,6 +20,10 @@ type Options struct {
 	DNS       netip.Addr   // DNS server announced to the OS (inside Address4)
 	AutoRoute bool
 	Routes    []netip.Prefix // routed into the interface when AutoRoute is on
+	// FD is a TUN set up by the system (Android VpnService): cypher only
+	// reads and writes packets; the system owns addresses, routes and DNS,
+	// and keeps cypher's own sockets out of the VPN.
+	FD int
 }
 
 // DefaultRoutes send everything into the TUN while staying more specific than
@@ -42,6 +46,9 @@ type Device struct {
 // Open creates the interface, configures addresses and routes, binds our
 // own outgoing sockets to the physical interface and starts the stack.
 func Open(opts Options, h Handler) (*Device, error) {
+	if opts.FD > 0 {
+		return openFD(opts, h)
+	}
 	// Find the physical interface before our routes take over.
 	phys, err := defaultInterface("")
 	if err != nil {
@@ -74,6 +81,21 @@ func Open(opts Options, h Handler) (*Device, error) {
 	go d.monitor(ctx, name)
 	slog.Info("TUN started", "name", name, "address", opts.Address4, "autoRoute", opts.AutoRoute)
 	return d, nil
+}
+
+func openFD(opts Options, h Handler) (*Device, error) {
+	dev, name, err := createFromFD(opts.FD)
+	if err != nil {
+		return nil, fmt.Errorf("open TUN fd %d: %w", opts.FD, err)
+	}
+	st, err := NewStack(dev, opts.MTU, h)
+	if err != nil {
+		dev.Close()
+		return nil, err
+	}
+	_, cancel := context.WithCancel(context.Background())
+	slog.Info("TUN started", "name", name, "fd", opts.FD)
+	return &Device{dev: dev, stack: st, cleanup: func() {}, cancel: cancel}, nil
 }
 
 // monitor follows changes of the default interface (Wi-Fi ↔ Ethernet).

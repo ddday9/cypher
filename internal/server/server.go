@@ -150,6 +150,9 @@ type Upstream interface {
 	DialTCP(ctx context.Context, addr netip.AddrPort) (net.Conn, error)
 }
 
+// SetUpstream replaces how the server dials the internet (tests).
+func (s *Server) SetUpstream(u Upstream) { s.upstream = u }
+
 type directUpstream struct{}
 
 func (directUpstream) DialTCP(ctx context.Context, addr netip.AddrPort) (net.Conn, error) {
