@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ddday9/cypher/internal/client"
 	"github.com/ddday9/cypher/internal/config"
@@ -40,9 +41,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 // Client routes local inbound connections to outbounds.
 type Client struct {
+	cfg       *config.Config
 	inbounds  []*inbound.Inbound
 	outbounds map[string]client.Outbound
-	router    *router.Router
+	router    atomic.Pointer[router.Router]
+
+	reloadMu sync.Mutex
+	watched  []string // files whose changes trigger a routing reload
 }
 
 // NewClient builds a client from config.
@@ -53,7 +58,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	if len(cfg.Inbounds) == 0 {
 		return nil, errors.New("no inbounds configured")
 	}
-	c := &Client{outbounds: map[string]client.Outbound{}}
+	c := &Client{cfg: cfg, outbounds: map[string]client.Outbound{}}
 	for i, oc := range cfg.Outbounds {
 		if oc.Tag == "" {
 			return nil, fmt.Errorf("outbounds[%d]: tag is required", i)
@@ -68,27 +73,12 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		c.outbounds[oc.Tag] = o
 	}
 
-	rc := cfg.Routing
-	geosite, geoip := rc.Geosite, rc.Geoip
-	if geosite == "" {
-		geosite = "geosite.dat"
-	}
-	if geoip == "" {
-		geoip = "geoip.dat"
-	}
-	geo := router.NewGeoLoader(cfg.Resolve(geosite), cfg.Resolve(geoip))
-	r, err := router.New(rc, cfg.Outbounds[0].Tag, geo)
+	r, watched, err := c.buildRouter(cfg)
 	if err != nil {
 		return nil, err
 	}
-	c.router = r
-	tags := []string{r.DefaultTag()}
-	tags = append(tags, r.OutboundTags()...)
-	for _, t := range tags {
-		if _, ok := c.outbounds[t]; !ok {
-			return nil, fmt.Errorf("routing refers to unknown outbound %q", t)
-		}
-	}
+	c.router.Store(r)
+	c.watched = watched
 
 	for i, ic := range cfg.Inbounds {
 		if ic.Tag == "" {
@@ -105,7 +95,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 
 // Dispatch implements inbound.Dispatcher.
 func (c *Client) Dispatch(ctx context.Context, inboundTag string, dest netx.Destination) (net.Conn, error) {
-	tag := c.router.Route(ctx, router.Metadata{InboundTag: inboundTag, Dest: dest})
+	tag := c.router.Load().Route(ctx, router.Metadata{InboundTag: inboundTag, Dest: dest})
 	o := c.outbounds[tag]
 	conn, err := o.Dial(ctx, dest)
 	if err != nil {
@@ -124,6 +114,7 @@ func (c *Client) Run(ctx context.Context) error {
 			o.Close()
 		}
 	}()
+	go c.watch(ctx, reloadInterval)
 	var wg sync.WaitGroup
 	errs := make(chan error, len(c.inbounds))
 	for _, in := range c.inbounds {

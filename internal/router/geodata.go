@@ -287,3 +287,15 @@ func (g *GeoLoader) IP(code string) (geoIP, error) {
 	g.ips[code] = res
 	return res, nil
 }
+
+// UsedFiles returns the geo files that were actually read.
+func (g *GeoLoader) UsedFiles() []string {
+	var files []string
+	if g.siteData != nil {
+		files = append(files, g.sitePath)
+	}
+	if g.ipData != nil {
+		files = append(files, g.ipPath)
+	}
+	return files
+}

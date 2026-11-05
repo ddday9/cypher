@@ -18,8 +18,10 @@ type Config struct {
 	Outbounds []OutboundConfig `json:"outbounds,omitempty"`
 	Routing   RoutingConfig    `json:"routing"`
 
-	// Dir is the directory of the config file (used to resolve relative paths).
-	Dir string `json:"-"`
+	// Path is the config file itself; Dir is its directory (used to resolve
+	// relative paths).
+	Path string `json:"-"`
+	Dir  string `json:"-"`
 }
 
 type LogConfig struct {
@@ -121,6 +123,7 @@ func Load(path string) (*Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	c.Path = path
 	c.Dir = dirOf(path)
 	return &c, nil
 }
