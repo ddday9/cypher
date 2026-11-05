@@ -78,7 +78,7 @@ type OutboundConfig struct {
 	Server      string `json:"server,omitempty"`      // host:port
 	ServerName  string `json:"serverName,omitempty"`  // TLS SNI; defaults to the server host
 	Key         string `json:"key,omitempty"`         // user key from `cypher genkey`
-	Fingerprint string `json:"fingerprint,omitempty"` // chrome, firefox, safari, edge, ios, random
+	Fingerprint string `json:"fingerprint,omitempty"` // firefox (default), chrome, safari, edge, ios, random
 	CA          string `json:"ca,omitempty"`          // extra CA certificate (PEM) to trust
 	Insecure    bool   `json:"insecure,omitempty"`    // skip certificate verification (testing only)
 

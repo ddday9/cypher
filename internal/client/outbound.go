@@ -72,7 +72,7 @@ func (b *Block) ListenPacket(context.Context, netx.Destination) (netx.PacketConn
 }
 
 var fingerprints = map[string]utls.ClientHelloID{
-	"":        utls.HelloChrome_Auto,
+	"":        utls.HelloFirefox_Auto, // default
 	"chrome":  utls.HelloChrome_Auto,
 	"firefox": utls.HelloFirefox_Auto,
 	"safari":  utls.HelloSafari_Auto,

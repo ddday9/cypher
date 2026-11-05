@@ -339,3 +339,29 @@ func TestClientInbounds(t *testing.T) {
 		t.Fatalf("http echo: %q %v", line, err)
 	}
 }
+
+// TestFingerprints checks that every supported ClientHello completes a
+// handshake with the server.
+func TestFingerprints(t *testing.T) {
+	e := startServer(t, true)
+	_, port, _ := net.SplitHostPort(e.serverAddr)
+	dest, _ := netx.ParseDestination("tcp", echoServer(t))
+	for _, fp := range []string{"", "firefox", "chrome", "safari", "edge", "ios", "random"} {
+		o, err := client.New(config.OutboundConfig{
+			Tag: "proxy", Type: "cypher", Server: "localhost:" + port,
+			Key: e.key.String(), CA: e.caFile, Fingerprint: fp,
+		}, func(p string) string { return p })
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, err := o.Dial(context.Background(), dest)
+		if err != nil {
+			t.Errorf("fingerprint %q: %v", fp, err)
+			o.Close()
+			continue
+		}
+		echoRoundTrip(t, c, "hi "+fp)
+		c.Close()
+		o.Close()
+	}
+}

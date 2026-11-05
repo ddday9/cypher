@@ -193,7 +193,7 @@ if [[ -n "$NEW_KEY" ]]; then
       "type": "cypher",
       "server": "$HOST:$PORT",
       "key": "$NEW_KEY",
-      "fingerprint": "chrome"$( [[ $SELF_SIGNED -eq 1 ]] && printf ',\n      "ca": "cert.pem"' )
+      "fingerprint": "firefox"$( [[ $SELF_SIGNED -eq 1 ]] && printf ',\n      "ca": "cert.pem"' )
     }
 EOF
   [[ $SELF_SIGNED -eq 1 ]] && echo "Self-signed: copy $ETC/cert.pem to the client as cert.pem."
