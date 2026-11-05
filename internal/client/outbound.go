@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ddday9/cypher/internal/config"
@@ -50,8 +52,7 @@ type Direct struct{ tag string }
 func (d *Direct) Tag() string  { return d.tag }
 func (d *Direct) Close() error { return nil }
 func (d *Direct) Dial(ctx context.Context, dest netx.Destination) (net.Conn, error) {
-	var dialer net.Dialer
-	return dialer.DialContext(ctx, "tcp", dest.String())
+	return netx.NewDialer(10*time.Second).DialContext(ctx, "tcp", dest.String())
 }
 
 // Block refuses every connection.
@@ -91,7 +92,50 @@ type Cypher struct {
 	roots      *x509.CertPool
 	insecure   bool
 
-	pool *pool
+	pool   *pool
+	pinned atomic.Pointer[string] // resolved server address, see PinServer
+}
+
+// PinServer resolves the server address once and uses the IP from then on.
+// TUN mode calls it before taking over routing, so that connecting to the
+// server never depends on DNS that itself goes through the tunnel.
+func (c *Cypher) PinServer(ctx context.Context) error {
+	host, port, _ := net.SplitHostPort(c.server)
+	if _, err := netip.ParseAddr(host); err == nil {
+		return nil
+	}
+	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return fmt.Errorf("resolve server %s: %w", host, err)
+	}
+	if len(addrs) == 0 {
+		return fmt.Errorf("resolve server %s: no addresses", host)
+	}
+	best := addrs[0]
+	for _, a := range addrs { // prefer IPv4: IPv6 is often missing on the client side
+		if a.Unmap().Is4() {
+			best = a
+			break
+		}
+	}
+	addr := net.JoinHostPort(best.Unmap().String(), port)
+	c.pinned.Store(&addr)
+	slog.Info("server address pinned", "outbound", c.tag, "server", c.server, "ip", addr)
+	return nil
+}
+
+// ServerIPs returns the pinned server address, if any.
+func (c *Cypher) ServerIPs() []netip.Addr {
+	if p := c.pinned.Load(); p != nil {
+		if ap, err := netip.ParseAddrPort(*p); err == nil {
+			return []netip.Addr{ap.Addr()}
+		}
+	}
+	host, _, _ := net.SplitHostPort(c.server)
+	if a, err := netip.ParseAddr(host); err == nil {
+		return []netip.Addr{a}
+	}
+	return nil
 }
 
 func newCypher(cfg config.OutboundConfig, resolve func(string) string) (*Cypher, error) {
@@ -154,8 +198,11 @@ func (c *Cypher) Close() error {
 }
 
 func (c *Cypher) connect(ctx context.Context) (*smux.Session, *protocol.RecordConn, error) {
-	d := net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	raw, err := d.DialContext(ctx, "tcp", c.server)
+	addr := c.server
+	if p := c.pinned.Load(); p != nil {
+		addr = *p
+	}
+	raw, err := netx.NewDialer(10*time.Second).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, nil, err
 	}

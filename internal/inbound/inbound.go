@@ -29,8 +29,12 @@ type Inbound struct {
 	typ     string
 	listen  string
 	handler func(ctx context.Context, conn net.Conn)
+	tun     *tunInbound
 	d       Dispatcher
 }
+
+// Type returns the inbound type ("socks", "http", "tun").
+func (in *Inbound) Type() string { return in.typ }
 
 // New creates an inbound from config.
 func New(cfg config.InboundConfig, d Dispatcher) (*Inbound, error) {
@@ -40,6 +44,13 @@ func New(cfg config.InboundConfig, d Dispatcher) (*Inbound, error) {
 		in.handler = in.handleSOCKS
 	case "http":
 		in.handler = in.handleHTTP
+	case "tun":
+		t, err := newTUN(in, cfg)
+		if err != nil {
+			return nil, err
+		}
+		in.tun = t
+		return in, nil
 	default:
 		return nil, fmt.Errorf("unknown inbound type %q", cfg.Type)
 	}
@@ -51,6 +62,9 @@ func New(cfg config.InboundConfig, d Dispatcher) (*Inbound, error) {
 
 // Serve listens until ctx is cancelled.
 func (in *Inbound) Serve(ctx context.Context) error {
+	if in.tun != nil {
+		return in.tun.serve(ctx)
+	}
 	ln, err := net.Listen("tcp", in.listen)
 	if err != nil {
 		return err

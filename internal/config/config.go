@@ -51,8 +51,23 @@ type FallbackConfig struct {
 
 type InboundConfig struct {
 	Tag    string `json:"tag"`
-	Type   string `json:"type"`   // socks, http
-	Listen string `json:"listen"` // 127.0.0.1:10808
+	Type   string `json:"type"`             // socks, http, tun
+	Listen string `json:"listen,omitempty"` // socks/http: 127.0.0.1:10808
+
+	// tun: capture all traffic of the system.
+	Name      string   `json:"name,omitempty"`      // interface name, default "cypher"
+	MTU       int      `json:"mtu,omitempty"`       // default 1500
+	Address   string   `json:"address,omitempty"`   // default "172.19.0.1/30"
+	Address6  string   `json:"address6,omitempty"`  // default "fdfe:dcba:9876::1/126"; "off" disables IPv6
+	AutoRoute *bool    `json:"autoRoute,omitempty"` // route traffic into the interface; default true
+	Routes    []string `json:"routes,omitempty"`    // what to route; default everything
+	// DNSHijack sends every DNS query (port 53, any address) to this server,
+	// through the routing rules — by default through the tunnel, so queries
+	// do not leak to the ISP. Default "1.1.1.1:53"; "off" disables.
+	DNSHijack string `json:"dnsHijack,omitempty"`
+	// Sniff reads the domain from TLS SNI / HTTP Host so that domain rules
+	// (geosite) work for connections made by IP. Default true.
+	Sniff *bool `json:"sniff,omitempty"`
 }
 
 type OutboundConfig struct {

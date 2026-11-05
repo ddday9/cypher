@@ -40,8 +40,8 @@ func (c *streamPacketConn) WritePacket(p []byte, to netx.Destination) error {
 func (c *streamPacketConn) Close() error { return c.st.Close() }
 
 // ListenPacket opens a local UDP socket.
-func (d *Direct) ListenPacket(context.Context, netx.Destination) (netx.PacketConn, error) {
-	pc, err := net.ListenUDP("udp", nil)
+func (d *Direct) ListenPacket(ctx context.Context, _ netx.Destination) (netx.PacketConn, error) {
+	pc, err := netx.ListenUDP(ctx)
 	if err != nil {
 		return nil, err
 	}

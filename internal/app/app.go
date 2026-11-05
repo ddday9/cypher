@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ddday9/cypher/internal/client"
 	"github.com/ddday9/cypher/internal/config"
@@ -105,6 +106,15 @@ func (c *Client) Dispatch(ctx context.Context, inboundTag string, dest netx.Dest
 	return conn, nil
 }
 
+func (c *Client) hasTUN() bool {
+	for _, in := range c.inbounds {
+		if in.Type() == "tun" {
+			return true
+		}
+	}
+	return false
+}
+
 // RoutePacket implements inbound.Dispatcher.
 func (c *Client) RoutePacket(ctx context.Context, inboundTag string, dest netx.Destination) string {
 	dest.Network = "udp"
@@ -134,6 +144,20 @@ func (c *Client) Run(ctx context.Context) error {
 			o.Close()
 		}
 	}()
+	if c.hasTUN() {
+		// Resolve server names now: once TUN routes are in place, DNS itself
+		// goes through the tunnel, which would need the server first.
+		for _, o := range c.outbounds {
+			if p, ok := o.(interface{ PinServer(context.Context) error }); ok {
+				pctx, pcancel := context.WithTimeout(ctx, 15*time.Second)
+				err := p.PinServer(pctx)
+				pcancel()
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
 	go c.watch(ctx, reloadInterval)
 	var wg sync.WaitGroup
 	errs := make(chan error, len(c.inbounds))

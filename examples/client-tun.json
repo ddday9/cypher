@@ -1,0 +1,28 @@
+{
+  "log": { "level": "info" },
+  "inbounds": [
+    { "tag": "tun", "type": "tun", "name": "cypher", "dnsHijack": "1.1.1.1:53", "sniff": true },
+    { "tag": "socks", "type": "socks", "listen": "127.0.0.1:10808" }
+  ],
+  "outbounds": [
+    {
+      "tag": "proxy",
+      "type": "cypher",
+      "server": "example.com:443",
+      "key": "REPLACE_WITH_THE_SAME_KEY_AS_ON_THE_SERVER",
+      "fingerprint": "chrome"
+    },
+    { "tag": "direct", "type": "direct" },
+    { "tag": "block",  "type": "block" }
+  ],
+  "routing": {
+    "geosite": "geosite.dat",
+    "geoip": "geoip.dat",
+    "rules": [
+      { "domain": ["geosite:category-ads-all"], "outbound": "block" },
+      { "domain": ["geosite:category-ru", "domain:ru", "domain:xn--p1ai"], "outbound": "direct" },
+      { "ip": ["geoip:private", "geoip:ru"], "outbound": "direct" }
+    ],
+    "default": "proxy"
+  }
+}
