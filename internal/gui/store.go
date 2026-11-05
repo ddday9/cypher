@@ -40,21 +40,22 @@ type Settings struct {
 	UserRules   []UserRule          `json:"userRules,omitempty"`   // checked before the preset
 	CustomRules []config.RuleConfig `json:"customRules,omitempty"` // advanced, Xray JSON
 	// DefaultAction applies with the "custom" preset to everything no rule matched.
-	DefaultAction string    `json:"defaultAction,omitempty"`
-	SystemProxy   bool      `json:"systemProxy"`
-	SocksPort     int       `json:"socksPort"`
-	HTTPPort      int       `json:"httpPort"`
-	Autostart     bool      `json:"autostart"`
-	AutoConnect   bool      `json:"autoConnect"`
-	GeoAuto       bool      `json:"geoAuto"`
-	GeoSource     string    `json:"geoSource"`        // preset ID or "custom"
-	GeoInterval   int       `json:"geoIntervalHours"` // refresh period
-	GeositeURL    string    `json:"geositeUrl"`
-	GeoipURL      string    `json:"geoipUrl"`
-	GeoUpdated    time.Time `json:"geoUpdated"`
-	Fingerprint   string    `json:"fingerprint,omitempty"` // overrides profiles when set
-	AntiFreeze    string    `json:"antiFreeze,omitempty"`  // auto (default), on, off; overrides profiles
-	LogLevel      string    `json:"logLevel"`
+	DefaultAction  string    `json:"defaultAction,omitempty"`
+	SystemProxy    bool      `json:"systemProxy"`
+	SocksPort      int       `json:"socksPort"`
+	HTTPPort       int       `json:"httpPort"`
+	Autostart      bool      `json:"autostart"`
+	AutoConnect    bool      `json:"autoConnect"`
+	GeoAuto        bool      `json:"geoAuto"`
+	GeoSource      string    `json:"geoSource"`        // preset ID or "custom"
+	GeoInterval    int       `json:"geoIntervalHours"` // refresh period
+	GeositeURL     string    `json:"geositeUrl"`
+	GeoipURL       string    `json:"geoipUrl"`
+	GeoUpdated     time.Time `json:"geoUpdated"`
+	Fingerprint    string    `json:"fingerprint,omitempty"`    // overrides profiles when set
+	AntiFreeze     string    `json:"antiFreeze,omitempty"`     // auto (default), on, off; overrides profiles
+	AntiFreezeRate int       `json:"antiFreezeRate,omitempty"` // new connections per 10 s in anti-freeze mode
+	LogLevel       string    `json:"logLevel"`
 }
 
 func defaultSettings() Settings {

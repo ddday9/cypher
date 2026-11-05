@@ -130,6 +130,7 @@ docker compose pull && docker compose up -d
 | `CYPHER_ACME_HTTP` | `:8081` (в compose) | куда nginx пересылает проверки HTTP-01 |
 | `CYPHER_FALLBACK_PROXY` | `http://nginx:8080` (в compose) | куда отправлять всех без ключа |
 | `CYPHER_ACME_DIRECTORY` | Let's Encrypt | другой ACME-сервер (например staging) |
+| `CYPHER_BLOCK_RU` | `0` | `1` — сервер не ходит на российские сайты и IP, чтобы его адрес не «светился» на них (в 2026 такие IP банили) |
 
 ## Безопасность контейнеров
 

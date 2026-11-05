@@ -80,15 +80,18 @@ var fingerprints = map[string]utls.ClientHelloID{
 	"safari":  utls.HelloSafari_Auto,
 	"edge":    utls.HelloEdge_Auto,
 	"ios":     utls.HelloIOS_Auto,
+	"android": utls.HelloAndroid_11_OkHttp,
 	// "random" picks one of the real browser profiles above for every new
 	// connection (uTLS's fully randomized hello does not look like any
 	// browser and sometimes fails the handshake).
 	"random": {},
 }
 
+// randomPool holds the profiles reported (2026) to pass the TSPU's
+// ClientHello scoring even towards "suspicious" hosting ranges, where
+// Chrome, Safari and iOS hellos were held.
 var randomPool = []utls.ClientHelloID{
-	utls.HelloFirefox_Auto, utls.HelloChrome_Auto, utls.HelloSafari_Auto,
-	utls.HelloEdge_Auto, utls.HelloIOS_Auto,
+	utls.HelloFirefox_Auto, utls.HelloEdge_Auto, utls.HelloAndroid_11_OkHttp,
 }
 
 // Cypher tunnels connections to a cypher server, multiplexing streams over
@@ -196,6 +199,10 @@ func newCypher(cfg config.OutboundConfig, resolve func(string) string) (*Cypher,
 	}
 	if c.seg.mode, err = parseAntiFreeze(cfg.AntiFreeze); err != nil {
 		return nil, fmt.Errorf("cypher outbound: %w", err)
+	}
+	c.seg.rate = carrierBurst
+	if cfg.AntiFreezeRate > 0 {
+		c.seg.rate = cfg.AntiFreezeRate
 	}
 	c.pool = newPool(c.tag, cfg.Connections, rot, c.connect)
 	c.pool.onFreeze = c.onFreeze

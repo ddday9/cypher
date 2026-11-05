@@ -28,6 +28,53 @@ const (
 // tunnels again.
 var antiFreezeHold = 30 * time.Minute
 
+// Carrier dial limits. Some ISPs block a server for 60–120 s after about a
+// dozen TLS connections to it in a short time (reports from Nov 2025 on).
+// Anti-freeze opens a connection per budget, so it must stay below that:
+// at most carrierBurst new connections per carrierWindow (configurable with
+// the outbound's antiFreezeRate). On dial failures the dialer backs off up
+// to carrierMaxBackoff and gives up after carrierGiveUp.
+var (
+	carrierBurst      = 8
+	carrierWindow     = 10 * time.Second
+	carrierMaxBackoff = 30 * time.Second
+	carrierGiveUp     = 2 * time.Minute
+)
+
+// dialLimiter allows at most n events per window.
+type dialLimiter struct {
+	mu     sync.Mutex
+	n      int
+	window time.Duration
+	times  []time.Time
+}
+
+// wait blocks until another dial is allowed (or the session closes).
+func (l *dialLimiter) wait(closed func() bool) {
+	for {
+		l.mu.Lock()
+		now := time.Now()
+		kept := l.times[:0]
+		for _, t := range l.times {
+			if now.Sub(t) < l.window {
+				kept = append(kept, t)
+			}
+		}
+		l.times = kept
+		if len(l.times) < l.n {
+			l.times = append(l.times, now)
+			l.mu.Unlock()
+			return
+		}
+		next := l.times[0].Add(l.window).Sub(now)
+		l.mu.Unlock()
+		if closed() {
+			return
+		}
+		time.Sleep(min(next, 500*time.Millisecond))
+	}
+}
+
 func parseAntiFreeze(s string) (string, error) {
 	switch strings.ToLower(s) {
 	case "", antiFreezeAuto:
@@ -43,6 +90,7 @@ func parseAntiFreeze(s string) (string, error) {
 // segState tracks what we know about the server and the current mode.
 type segState struct {
 	mode      string
+	rate      int          // carrier dials per carrierWindow
 	supported atomic.Int32 // 0 unknown, 1 yes (HELLO said so), -1 no (v1 server)
 	until     atomic.Int64 // auto mode: segmented until this unix nano
 }
@@ -68,6 +116,17 @@ func (c *Cypher) onFreeze() {
 			"outbound", c.tag, "for", antiFreezeHold)
 	}
 	st.until.Store(time.Now().Add(antiFreezeHold).UnixNano())
+}
+
+// antiFreezeBackfired ends auto mode's segmented period early when new
+// connections to the server start failing.
+func (c *Cypher) antiFreezeBackfired() {
+	if c.seg.mode != antiFreezeAuto || time.Now().UnixNano() >= c.seg.until.Load() {
+		return
+	}
+	c.seg.until.Store(0)
+	slog.Warn("new connections to the server are failing; leaving anti-freeze mode (too many connections may be what is blocked)",
+		"outbound", c.tag)
 }
 
 // AntiFreezeActive reports whether new tunnels use the segmented mode.
@@ -149,7 +208,8 @@ func (c *Cypher) connectSegmented(ctx context.Context) (*link, error) {
 	c.seg.supported.Store(1)
 
 	sess := protocol.NewSession(id, protocol.DefaultBudget)
-	d := &carrierDialer{c: c, sess: sess, id: id}
+	d := &carrierDialer{c: c, sess: sess, id: id,
+		limit: &dialLimiter{n: c.seg.rate, window: carrierWindow}}
 	sess.NeedCarrier = d.request
 	sess.Attach(rc)
 	ms, err := smux.Client(sess, protocol.MuxConfig())
@@ -169,6 +229,8 @@ type carrierDialer struct {
 	id      [16]byte
 	seq     atomic.Uint32
 	running atomic.Bool
+
+	limit *dialLimiter
 
 	mu         sync.Mutex
 	lastAttach time.Time
@@ -198,21 +260,31 @@ func (d *carrierDialer) request(reason string) {
 	go func() {
 		defer d.running.Store(false)
 		fails := 0
+		var failingSince time.Time
 		for d.sess.WantsCarrier() {
+			d.limit.wait(d.sess.Closed)
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			err := d.attach(ctx)
 			cancel()
 			if err == nil {
-				fails = 0
+				fails, failingSince = 0, time.Time{}
 				continue
 			}
 			fails++
-			slog.Debug("carrier dial failed", "outbound", d.c.tag, "err", err)
-			if fails >= 5 {
+			if failingSince.IsZero() {
+				failingSince = time.Now()
+			}
+			slog.Debug("carrier dial failed", "outbound", d.c.tag, "err", err, "fails", fails)
+			if fails == 3 {
+				// New connections are being refused: possibly a limit on
+				// connections per server, which short connections only feed.
+				d.c.antiFreezeBackfired()
+			}
+			if time.Since(failingSince) > carrierGiveUp {
 				d.sess.Close()
 				return
 			}
-			time.Sleep(time.Duration(fails) * 300 * time.Millisecond)
+			time.Sleep(min(time.Duration(1<<min(fails-1, 5))*time.Second, carrierMaxBackoff))
 		}
 	}()
 }

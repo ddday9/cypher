@@ -97,7 +97,7 @@ type OutboundConfig struct {
 	Server      string `json:"server,omitempty"`      // host:port
 	ServerName  string `json:"serverName,omitempty"`  // TLS SNI; defaults to the server host
 	Key         string `json:"key,omitempty"`         // user key from `cypher genkey`
-	Fingerprint string `json:"fingerprint,omitempty"` // firefox (default), chrome, safari, edge, ios, random
+	Fingerprint string `json:"fingerprint,omitempty"` // firefox (default), edge, android, chrome, safari, ios, random
 	CA          string `json:"ca,omitempty"`          // extra CA certificate (PEM) to trust
 	Insecure    bool   `json:"insecure,omitempty"`    // skip certificate verification (testing only)
 
@@ -108,6 +108,10 @@ type OutboundConfig struct {
 	// connection freeze is detected; "on" always uses them; "off" never.
 	// Needs a server of protocol version 2.
 	AntiFreeze string `json:"antiFreeze,omitempty"`
+	// AntiFreezeRate: at most this many new connections per 10 seconds in
+	// anti-freeze mode (default 8; some ISPs block after ~12 quick TLS
+	// connections to one server). Higher is faster but riskier.
+	AntiFreezeRate int `json:"antiFreezeRate,omitempty"`
 }
 
 // RotationConfig controls how long a tunnel connection lives. Each value is

@@ -84,6 +84,19 @@ func initServerConfig(path string) error {
 		srv.Fallback.Dir = envOr("CYPHER_SITE", "/var/www/cypher")
 	}
 	cfg := config.Config{Server: srv}
+	if os.Getenv("CYPHER_BLOCK_RU") == "1" {
+		// Keep the server's outgoing IP away from Russian sites: in 2026 IPs
+		// of VPN exits seen on Russian services were banned (net4people #671).
+		// Clients send Russian traffic directly by default anyway.
+		cfg.Routing = config.RoutingConfig{
+			GeositeURL: "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat",
+			GeoipURL:   "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat",
+			Rules: []config.RuleConfig{
+				{Domain: []string{"geosite:category-ru", "domain:ru", "domain:xn--p1ai", "domain:su"}, Outbound: "block"},
+				{IP: []string{"geoip:ru"}, Outbound: "block"},
+			},
+		}
+	}
 	cfg.Log.Level = envOr("CYPHER_LOG", "info")
 	if err := writeConfig(path, &cfg); err != nil {
 		return err

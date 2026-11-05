@@ -358,7 +358,7 @@ func TestFingerprints(t *testing.T) {
 	e := startServer(t, true)
 	_, port, _ := net.SplitHostPort(e.serverAddr)
 	dest, _ := netx.ParseDestination("tcp", echoServer(t))
-	for _, fp := range []string{"", "firefox", "chrome", "safari", "edge", "ios", "random"} {
+	for _, fp := range []string{"", "firefox", "chrome", "safari", "edge", "ios", "android", "random", "random", "random"} {
 		o, err := client.New(config.OutboundConfig{
 			Tag: "proxy", Type: "cypher", Server: "localhost:" + port,
 			Key: e.key.String(), CA: e.caFile, Fingerprint: fp,

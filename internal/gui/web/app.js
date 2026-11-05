@@ -310,6 +310,7 @@ function fillSettings() {
   $("sysProxy").checked = draft.systemProxy;
   $("fingerprint").value = draft.fingerprint || "";
   $("antiFreeze").value = draft.antiFreeze || "";
+  $("antiFreezeRate").value = String([20, 1000].includes(draft.antiFreezeRate) ? draft.antiFreezeRate : 0);
   $("socksPort").value = draft.socksPort;
   $("httpPort").value = draft.httpPort;
   renderGeo();
@@ -432,6 +433,7 @@ $("saveBtn").addEventListener("click", (e) => busy(e.target, async () => {
   s.systemProxy = $("sysProxy").checked;
   s.fingerprint = $("fingerprint").value;
   s.antiFreeze = $("antiFreeze").value;
+  s.antiFreezeRate = Number($("antiFreezeRate").value);
   s.socksPort = Number($("socksPort").value);
   s.httpPort = Number($("httpPort").value);
   s.geoSource = $("geoSource").value;

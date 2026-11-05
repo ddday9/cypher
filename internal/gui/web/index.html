@@ -116,6 +116,7 @@
             <option value="safari">Safari</option>
             <option value="edge">Edge</option>
             <option value="ios">iOS</option>
+            <option value="android">Android</option>
             <option value="random">Случайный</option>
           </select></label>
         <label class="item"><span>Защита от заморозки<small>Короткие соединения, если оператор «замораживает» трафик</small></span>
@@ -123,6 +124,12 @@
             <option value="">Авто</option>
             <option value="on">Всегда</option>
             <option value="off">Выключена</option>
+          </select></label>
+        <label class="item"><span>Скорость защиты<small>Больше соединений — быстрее, но некоторые провайдеры блокируют за частые подключения</small></span>
+          <select id="antiFreezeRate">
+            <option value="0">Осторожно</option>
+            <option value="20">Быстрее</option>
+            <option value="1000">Без ограничения</option>
           </select></label>
         <label class="item"><span>Порт SOCKS5</span><input type="number" id="socksPort" min="1" max="65535"></label>
         <label class="item"><span>Порт HTTP</span><input type="number" id="httpPort" min="1" max="65535"></label>

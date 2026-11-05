@@ -25,6 +25,9 @@ services:
       CYPHER_EMAIL: ${CYPHER_EMAIL:-}
       CYPHER_ACME_HTTP: ":8081"
       CYPHER_FALLBACK_PROXY: "http://nginx:8080"
+      # 1 = the server refuses Russian sites, so its IP is not seen on them
+      # (clients send Russian traffic directly by default anyway).
+      CYPHER_BLOCK_RU: ${CYPHER_BLOCK_RU:-0}
     volumes:
       # Config, user keys and the certificate.
       - cypher-data:/etc/cypher

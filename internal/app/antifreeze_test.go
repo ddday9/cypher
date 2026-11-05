@@ -123,6 +123,7 @@ func TestAntiFreeze(t *testing.T) {
 		o, err := client.New(config.OutboundConfig{
 			Tag: "proxy", Type: "cypher", Server: "127.0.0.1:" + port, ServerName: "localhost",
 			Key: e.key.String(), CA: e.caFile, AntiFreeze: mode,
+			AntiFreezeRate: 1000, // correctness here; the dial limit has its own test
 		}, func(p string) string { return p })
 		if err != nil {
 			t.Fatal(err)

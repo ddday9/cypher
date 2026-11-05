@@ -175,7 +175,7 @@ systemd-resolved, cypher направляет все DNS-запросы в TUN �
 ## Защита от заморозки
 
 В outbound `cypher`: `"antiFreeze": "auto"` (по умолчанию), `"on"` или
-`"off"` — см. [протокол, раздел 7](protocol.md). В ссылке — параметр
+`"off"`; `"antiFreezeRate"` — новых соединений за 10 с (по умолчанию 8) — см. [протокол, раздел 7](protocol.md). В ссылке — параметр
 `af=auto|on|off` (`cypher link … -af on`).
 
 ## Базы geosite/geoip по ссылкам
