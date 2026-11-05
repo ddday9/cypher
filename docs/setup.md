@@ -18,70 +18,51 @@ make linux windows
 
 ## 2. Сервер (Linux)
 
-### Сертификат
+### Быстро: скрипт
+
+Скопируйте на сервер бинарник и папку `deploy/` (например, `scp -r bin deploy user@server:`),
+затем на сервере:
 
 ```bash
-sudo apt install certbot
+sudo ./deploy/install-server.sh --domain example.com --email you@example.com
 ```
+
+Скрипт:
+* создаёт системного пользователя `cypher` и `/etc/cypher`;
+* получает сертификат Let's Encrypt (на время получения нужен свободный порт 80)
+  и ставит hook, который после каждого продления копирует сертификат в
+  `/etc/cypher/` с правами для `cypher` — сервер подхватывает его сам;
+* генерирует ключ, пишет `/etc/cypher/server.json`;
+* кладёт сайт-прикрытие в `/var/www/cypher` (свой сайт: `--site ./my-site`);
+* ставит и запускает systemd-службу, открывает порт в `ufw`, если он включён;
+* печатает готовый блок `outbound` для клиента с ключом.
+
+Без домена, для проверки: `--self-signed` (сертификат на IP сервера;
+`/etc/cypher/cert.pem` нужно скопировать на клиент и указать в `"ca"`).
+
+Добавить ещё одного пользователя (отдельный ключ, например для телефона):
 
 ```bash
-sudo certbot certonly --standalone -d example.com
+sudo ./deploy/install-server.sh --add-user phone
 ```
 
-Сертификат ляжет в `/etc/letsencrypt/live/example.com/`. Сервер сам
-перечитывает его после продления, перезапуск не нужен.
+Повторный запуск обновляет бинарник и службу, существующий конфиг не трогает.
 
-### Пользователь и файлы
+### Проверка с другого Linux-хоста
 
 ```bash
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin cypher
+./deploy/test-client.sh --server example.com:443 --key КЛЮЧ
 ```
 
-```bash
-sudo install -m 755 bin/cypher-linux-amd64 /usr/local/bin/cypher
-```
+Скрипт поднимает временный клиент и проверяет: сайт-прикрытие отдаётся без
+ключа; TCP через туннель работает и выходит с IP сервера; UDP (DNS-запрос к
+1.1.1.1) проходит через туннель.
 
-```bash
-sudo mkdir -p /etc/cypher /var/www/site
-```
-
-Дайте пользователю `cypher` читать сертификат:
-
-```bash
-sudo chgrp -R cypher /etc/letsencrypt/live /etc/letsencrypt/archive && sudo chmod -R g+rX /etc/letsencrypt/live /etc/letsencrypt/archive
-```
-
-### Ключ и конфиг
-
-```bash
-cypher genkey
-```
-
-Скопируйте `examples/server.json` в `/etc/cypher/server.json`, впишите домен
-в пути к сертификату и ключ из `genkey` в `users`.
-
-### Сайт-прикрытие
-
-Положите в `/var/www/site` любой правдоподобный статический сайт
-(`index.html` и пара страниц). Его увидит любой, кто зайдёт на ваш домен
-браузером, — и цензор, который проверяет сервер. Без `fallback.dir` сервер
-показывает простую заглушку.
-
-### Запуск
-
-```bash
-sudo cp deploy/cypher.service /etc/systemd/system/
-```
-
-```bash
-sudo systemctl daemon-reload && sudo systemctl enable --now cypher
-```
+Логи сервера:
 
 ```bash
 journalctl -u cypher -f
 ```
-
-Проверка: откройте `https://example.com` в браузере — должен открыться ваш сайт.
 
 ## 3. Клиент (Windows)
 
