@@ -83,7 +83,34 @@ docker compose exec cypher cypher user revoke phone
 
 `add` и `link` печатают ссылку `cypher://…` для клиента.
 
-## 5. Обновление
+## 5. Правила на сервере и базы geosite/geoip
+
+Сервер может сам блокировать направления для всех пользователей (или для
+одного: `inboundTag` — это имя пользователя). Действия: `direct` и `block`.
+Базы скачиваются по ссылкам и обновляются встроенным таймером — cron не
+нужен; новые файлы и изменённые правила применяются без перезапуска.
+
+Добавьте в `/etc/cypher/server.json` (в томе) секцию `routing`:
+
+```json
+"routing": {
+  "geositeURL": "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat",
+  "geoipURL": "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat",
+  "geoUpdate": "24h",
+  "rules": [
+    { "domain": ["geosite:category-ads-all"], "outbound": "block" },
+    { "inboundTag": ["kids"], "domain": ["geosite:category-porn"], "outbound": "block" }
+  ]
+}
+```
+
+Отредактировать конфиг в томе удобно так:
+
+```bash
+docker run --rm -it --user 65532 -v cypher_cypher-data:/d alpine vi /d/server.json
+```
+
+## 6. Обновление
 
 ```bash
 docker compose pull && docker compose up -d

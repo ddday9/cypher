@@ -1,8 +1,20 @@
 {
-  "log": { "level": "info" },
+  "log": {
+    "level": "info"
+  },
   "inbounds": [
-    { "tag": "tun", "type": "tun", "name": "cypher", "dnsHijack": "1.1.1.1:53", "sniff": true },
-    { "tag": "socks", "type": "socks", "listen": "127.0.0.1:10808" }
+    {
+      "tag": "tun",
+      "type": "tun",
+      "name": "cypher",
+      "dnsHijack": "1.1.1.1:53",
+      "sniff": true
+    },
+    {
+      "tag": "socks",
+      "type": "socks",
+      "listen": "127.0.0.1:10808"
+    }
   ],
   "outbounds": [
     {
@@ -12,16 +24,50 @@
       "key": "REPLACE_WITH_THE_SAME_KEY_AS_ON_THE_SERVER",
       "fingerprint": "firefox"
     },
-    { "tag": "direct", "type": "direct" },
-    { "tag": "block",  "type": "block" }
+    {
+      "tag": "direct",
+      "type": "direct"
+    },
+    {
+      "tag": "block",
+      "type": "block"
+    }
   ],
   "routing": {
     "geosite": "geosite.dat",
     "geoip": "geoip.dat",
+    "geositeURL": "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat",
+    "geoipURL": "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat",
+    "geoUpdate": "24h",
     "rules": [
-      { "domain": ["geosite:category-ads-all"], "outbound": "block" },
-      { "domain": ["geosite:category-ru", "domain:ru", "domain:xn--p1ai"], "outbound": "direct" },
-      { "ip": ["geoip:private", "geoip:ru"], "outbound": "direct" }
+      {
+        "process": [
+          "dota2.exe",
+          "steam.exe"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "domain": [
+          "geosite:category-ads-all"
+        ],
+        "outbound": "block"
+      },
+      {
+        "domain": [
+          "geosite:category-ru",
+          "domain:ru",
+          "domain:xn--p1ai"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "ip": [
+          "geoip:private",
+          "geoip:ru"
+        ],
+        "outbound": "direct"
+      }
     ],
     "default": "proxy"
   }

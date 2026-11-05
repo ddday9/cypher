@@ -120,6 +120,12 @@ type RotationConfig struct {
 type RoutingConfig struct {
 	Geosite string `json:"geosite,omitempty"` // path to geosite.dat
 	Geoip   string `json:"geoip,omitempty"`   // path to geoip.dat
+	// GeositeURL / GeoipURL: where to download the files from. They are
+	// fetched when missing and refreshed every GeoUpdate ("24h" by default,
+	// "off" to disable) by a built-in timer; new files apply without a restart.
+	GeositeURL string `json:"geositeURL,omitempty"`
+	GeoipURL   string `json:"geoipURL,omitempty"`
+	GeoUpdate  string `json:"geoUpdate,omitempty"`
 	// DomainStrategy: "AsIs" (default) or "IPIfNonMatch" — resolve the domain
 	// and retry IP rules when no rule matched by domain. Note that
 	// IPIfNonMatch performs local DNS lookups.
@@ -136,7 +142,11 @@ type RuleConfig struct {
 	Port       PortList `json:"port,omitempty"`
 	Network    string   `json:"network,omitempty"` // "tcp", "udp" or "tcp,udp"
 	InboundTag []string `json:"inboundTag,omitempty"`
-	Outbound   string   `json:"outbound"`
+	// Process matches the program that opened the connection, by file name
+	// ("dota2.exe", case-insensitive) or full path. Works for traffic that
+	// reaches cypher: TUN mode, or apps using the proxy.
+	Process  []string `json:"process,omitempty"`
+	Outbound string   `json:"outbound"`
 }
 
 // PortList accepts either a number (443) or a string ("80,443,1000-2000").

@@ -275,21 +275,45 @@ function renderServers() {
 
 let draft = null;
 
+const RULE_TYPES = [
+  ["domain", "Домен", "example.com (и поддомены)"],
+  ["geosite", "geosite", "google, youtube, category-ru"],
+  ["ip", "IP / сеть", "1.2.3.4, 10.0.0.0/8"],
+  ["geoip", "geoip", "ru, private, telegram"],
+  ["port", "Порт", "443, 27015-27030"],
+  ["keyword", "Слово в домене", "torrent"],
+  ["full", "Точный домен", "www.example.com"],
+];
+const ACTIONS = [["proxy", "Через VPN"], ["direct", "Напрямую"], ["block", "Блокировать"]];
+const ACTIONS_SHORT = [["proxy", "VPN"], ["direct", "Напрямую"], ["block", "Блок"]];
+
+function select(options, value, onchange) {
+  const sel = el("select", {});
+  for (const [v, label] of options) {
+    const o = el("option", { value: v }, label);
+    if (v === value) o.selected = true;
+    sel.append(o);
+  }
+  sel.addEventListener("change", () => { onchange(sel.value); settingsDirty = true; });
+  return sel;
+}
+
 function fillSettings() {
   draft = structuredClone(state.data.settings);
+  draft.userRules = draft.userRules || [];
   renderPresets();
-  $("customRules").value = JSON.stringify(draft.customRules || [], null, 2);
+  renderApps();
+  renderRules();
+  $("customRules").value = (draft.customRules && draft.customRules.length) ? JSON.stringify(draft.customRules, null, 2) : "";
+  $("defaultAction").value = draft.defaultAction || "proxy";
   $("sysProxy").checked = draft.systemProxy;
   $("fingerprint").value = draft.fingerprint || "";
   $("socksPort").value = draft.socksPort;
   $("httpPort").value = draft.httpPort;
-  $("geoAuto").checked = draft.geoAuto;
-  $("geositeUrl").value = draft.geositeUrl;
-  $("geoipUrl").value = draft.geoipUrl;
+  renderGeo();
   $("autostart").checked = draft.autostart;
   $("autoConnect").checked = draft.autoConnect;
   $("logLevel").value = draft.logLevel || "info";
-  $("geoUpdated").textContent = state.haveGeo ? "Обновлено " + ago(draft.geoUpdated) : "Ещё не загружены";
   $("about").textContent = `cypher ${info.version} · данные: ${info.dataDir}`;
   settingsDirty = false;
 }
@@ -302,7 +326,95 @@ function renderPresets() {
     n.addEventListener("click", () => { draft.routing = p.id; settingsDirty = true; renderPresets(); });
     return n;
   }));
-  $("customBox").classList.toggle("hidden", draft.routing !== "custom");
+  $("defaultBox").classList.toggle("hidden", draft.routing !== "custom");
+}
+
+function renderApps() {
+  const apps = draft.userRules.map((r, i) => [r, i]).filter(([r]) => r.type === "process");
+  if (!apps.length) {
+    $("appList").replaceChildren(el("div", { class: "empty-row" }, "Например, dota2.exe — напрямую, чтобы игра шла без VPN."));
+    return;
+  }
+  $("appList").replaceChildren(...apps.map(([r, i]) => el("div", { class: "app" },
+    el("span", { class: "app-icon" }, (r.value[0] || "?")),
+    el("span", { class: "app-name", title: r.value }, r.value),
+    select(ACTIONS, r.action, (v) => { r.action = v; }),
+    el("button", { class: "icon-btn", title: "Убрать", onclick: () => { draft.userRules.splice(i, 1); settingsDirty = true; renderApps(); } }, "✕"))));
+}
+
+function renderRules() {
+  const rules = draft.userRules.map((r, i) => [r, i]).filter(([r]) => r.type !== "process");
+  if (!rules.length) {
+    $("ruleList").replaceChildren(el("div", { class: "empty-row" }, "Правил пока нет."));
+    return;
+  }
+  $("ruleList").replaceChildren(...rules.map(([r, i]) => {
+    const type = RULE_TYPES.find((t) => t[0] === r.type) || RULE_TYPES[0];
+    const input = el("input", { type: "text", value: r.value, placeholder: type[2], spellcheck: "false" });
+    input.addEventListener("input", () => { r.value = input.value; settingsDirty = true; });
+    return el("div", { class: "rule" },
+      select(RULE_TYPES.map((t) => [t[0], t[1]]), r.type, (v) => { r.type = v; renderRules(); }),
+      input,
+      select(ACTIONS_SHORT, r.action, (v) => { r.action = v; }),
+      el("button", { class: "icon-btn", title: "Удалить", onclick: () => { draft.userRules.splice(i, 1); settingsDirty = true; renderRules(); } }, "✕"));
+  }));
+}
+
+$("addRuleBtn").addEventListener("click", () => {
+  draft.userRules.push({ type: "domain", value: "", action: "direct" });
+  settingsDirty = true;
+  renderRules();
+  const inputs = $("ruleList").querySelectorAll("input");
+  if (inputs.length) inputs[inputs.length - 1].focus();
+});
+
+// Application picker.
+let processes = [];
+function addApp(name) {
+  name = name.trim();
+  if (!name) return;
+  if (!draft.userRules.some((r) => r.type === "process" && r.value.toLowerCase() === name.toLowerCase())) {
+    draft.userRules.push({ type: "process", value: name, action: "direct" });
+    settingsDirty = true;
+  }
+  renderApps();
+  $("picker").classList.add("hidden");
+}
+function renderPicker() {
+  const q = $("pickerSearch").value.trim().toLowerCase();
+  const list = processes.filter((p) => !q || p.name.toLowerCase().includes(q)).slice(0, 200);
+  $("pickerList").replaceChildren(...(list.length ? list.map((p) => el("div", { class: "pick", onclick: () => addApp(p.name) },
+    el("span", { class: "app-icon" }, p.name[0] || "?"), el("span", {}, p.name)))
+    : [el("div", { class: "empty-row" }, "Не найдено среди запущенных — добавьте по имени файла.")]));
+}
+$("addAppBtn").addEventListener("click", async () => {
+  $("pickerSearch").value = "";
+  $("picker").classList.remove("hidden");
+  $("pickerSearch").focus();
+  processes = await api("processes").catch(() => []);
+  renderPicker();
+});
+$("pickerSearch").addEventListener("input", renderPicker);
+$("pickerSearch").addEventListener("keydown", (e) => { if (e.key === "Enter") addApp($("pickerSearch").value); });
+$("pickerManual").addEventListener("click", () => addApp($("pickerSearch").value));
+$("pickerClose").addEventListener("click", () => $("picker").classList.add("hidden"));
+$("picker").addEventListener("click", (e) => { if (e.target.id === "picker") $("picker").classList.add("hidden"); });
+
+function renderGeo() {
+  const sel = $("geoSource");
+  sel.replaceChildren(...info.geoSources.map((g) => el("option", { value: g.id }, g.name)), el("option", { value: "custom" }, "Свои ссылки"));
+  sel.value = draft.geoSource || "custom";
+  const showCustom = () => {
+    const g = info.geoSources.find((x) => x.id === sel.value);
+    $("geoNote").textContent = g ? g.note : "любые файлы в формате Xray";
+    $("geoCustom").classList.toggle("hidden", !!g);
+  };
+  sel.onchange = () => { draft.geoSource = sel.value; settingsDirty = true; showCustom(); };
+  showCustom();
+  $("geositeUrl").value = draft.geositeUrl;
+  $("geoipUrl").value = draft.geoipUrl;
+  $("geoInterval").value = String(draft.geoAuto ? (draft.geoIntervalHours || 24) : 0);
+  $("geoUpdated").textContent = state.haveGeo ? "обновлено " + ago(draft.geoUpdated) : "ещё не загружены";
 }
 
 document.querySelectorAll("#view-settings input, #view-settings select, #view-settings textarea")
@@ -310,17 +422,21 @@ document.querySelectorAll("#view-settings input, #view-settings select, #view-se
 
 $("saveBtn").addEventListener("click", (e) => busy(e.target, async () => {
   const s = draft;
-  if (s.routing === "custom") {
-    try { s.customRules = JSON.parse($("customRules").value || "[]"); }
-    catch (err) { throw new Error("Ошибка в JSON правил: " + err.message); }
-  }
+  const json = $("customRules").value.trim();
+  try { s.customRules = json ? JSON.parse(json) : []; }
+  catch (err) { throw new Error("Ошибка в JSON расширенных правил: " + err.message); }
+  s.userRules = s.userRules.filter((r) => r.value.trim() !== "");
+  s.defaultAction = $("defaultAction").value;
   s.systemProxy = $("sysProxy").checked;
   s.fingerprint = $("fingerprint").value;
   s.socksPort = Number($("socksPort").value);
   s.httpPort = Number($("httpPort").value);
-  s.geoAuto = $("geoAuto").checked;
+  s.geoSource = $("geoSource").value;
   s.geositeUrl = $("geositeUrl").value.trim();
   s.geoipUrl = $("geoipUrl").value.trim();
+  const hours = Number($("geoInterval").value);
+  s.geoAuto = hours > 0;
+  if (hours > 0) s.geoIntervalHours = hours;
   s.autostart = $("autostart").checked;
   s.autoConnect = $("autoConnect").checked;
   s.logLevel = $("logLevel").value;

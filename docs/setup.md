@@ -172,6 +172,24 @@ systemd-resolved, cypher направляет все DNS-запросы в TUN �
   его и проверяет IP-правила (например, `geoip:ru`). **Внимание:** это
   локальный DNS-запрос к провайдеру, он раскрывает домен.
 
+## Базы geosite/geoip по ссылкам
+
+В секции `routing` клиента (и сервера) можно указать, откуда брать базы.
+Если файла нет — он скачивается при запуске; дальше обновляется встроенным
+таймером (cron не нужен):
+
+```json
+"routing": {
+  "geositeURL": "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat",
+  "geoipURL": "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat",
+  "geoUpdate": "24h",
+  "rules": [ … ]
+}
+```
+
+`geoUpdate`: период (`12h`, `24h`, `72h`) или `off`. Правило по программе:
+`{ "process": ["dota2.exe"], "outbound": "direct" }`.
+
 ## Обновление правил без перезапуска
 
 Клиент каждые 3 секунды проверяет `geosite.dat`, `geoip.dat` и свой конфиг.

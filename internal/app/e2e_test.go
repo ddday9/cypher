@@ -84,10 +84,19 @@ type env struct {
 	serverAddr string
 	key        protocol.Key
 	caFile     string
+	keyFile    string
 	pool       *x509.CertPool
 }
 
 func startServer(t *testing.T, allowPrivate bool) env {
+	return startServerOpts(t, allowPrivate, nil)
+}
+
+func startServerWith(t *testing.T, setup func(*server.Server)) env {
+	return startServerOpts(t, true, setup)
+}
+
+func startServerOpts(t *testing.T, allowPrivate bool, setup func(*server.Server)) env {
 	t.Helper()
 	dir := t.TempDir()
 	certFile, keyFile, pool := writeCert(t, dir)
@@ -101,6 +110,9 @@ func startServer(t *testing.T, allowPrivate bool) env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if setup != nil {
+		setup(s)
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +120,7 @@ func startServer(t *testing.T, allowPrivate bool) env {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go s.Serve(ctx, ln)
-	return env{serverAddr: ln.Addr().String(), key: key, caFile: certFile, pool: pool}
+	return env{serverAddr: ln.Addr().String(), key: key, caFile: certFile, keyFile: keyFile, pool: pool}
 }
 
 func (e env) outbound(t *testing.T, key protocol.Key) client.Outbound {
@@ -455,5 +467,42 @@ func TestRevokeUser(t *testing.T) {
 	echoRoundTrip(t, cb, "bob")
 	if err := s.SetUsers(nil); err == nil {
 		t.Fatal("empty user list accepted")
+	}
+}
+
+func TestServerRouting(t *testing.T) {
+	e := startServerWith(t, func(s *server.Server) {
+		if err := s.SetRouting(config.RoutingConfig{Rules: []config.RuleConfig{
+			{Domain: []string{"domain:blocked.test"}, Outbound: "block"},
+			{InboundTag: []string{"test"}, Port: "9", Outbound: "block"},
+		}}, func(p string) string { return p }); err != nil {
+			t.Fatal(err)
+		}
+	})
+	o := e.outbound(t, e.key)
+	var se protocol.StatusError
+	_, err := o.Dial(context.Background(), netx.Destination{Network: "tcp", Host: "x.blocked.test", Port: 80})
+	if !errors.As(err, &se) || byte(se) != protocol.StatusNotAllowed {
+		t.Fatalf("domain rule: %v", err)
+	}
+	_, err = o.Dial(context.Background(), netx.Destination{Network: "tcp", Host: "127.0.0.1", Port: 9})
+	if !errors.As(err, &se) || byte(se) != protocol.StatusNotAllowed {
+		t.Fatalf("per-user rule: %v", err)
+	}
+	dest, _ := netx.ParseDestination("tcp", echoServer(t))
+	c, err := o.Dial(context.Background(), dest)
+	if err != nil {
+		t.Fatalf("allowed destination: %v", err)
+	}
+	echoRoundTrip(t, c, "ok")
+	// Only direct/block are valid on a server.
+	id := func(p string) string { return p }
+	s, err := server.New(&config.ServerConfig{CertFile: e.caFile, KeyFile: e.keyFile,
+		Users: []config.UserConfig{{Key: protocol.GenerateKey().String()}}}, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRouting(config.RoutingConfig{Rules: []config.RuleConfig{{Port: "1", Outbound: "proxy"}}}, id); err == nil {
+		t.Fatal("proxy outbound accepted on the server")
 	}
 }

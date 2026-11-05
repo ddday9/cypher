@@ -11,11 +11,13 @@ import (
 	"net/netip"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ddday9/cypher/internal/config"
 	"github.com/ddday9/cypher/internal/netx"
 	"github.com/ddday9/cypher/internal/protocol"
+	"github.com/ddday9/cypher/internal/router"
 	"github.com/xtaci/smux"
 	"golang.org/x/crypto/acme"
 )
@@ -35,6 +37,8 @@ type Server struct {
 	fallback     *fallback
 	allowPrivate bool
 	resolver     *net.Resolver
+
+	router atomic.Pointer[router.Router]
 
 	sessMu   sync.Mutex
 	sessions map[protocol.Key]map[*smux.Session]struct{}
@@ -263,6 +267,11 @@ func (s *Server) handleStream(st *smux.Stream, user *protocol.User) {
 		return
 	default:
 		st.Write([]byte{protocol.StatusFailure})
+		return
+	}
+	if s.blocked(user.Name, req.Dest) {
+		st.Write([]byte{protocol.StatusNotAllowed})
+		slog.Debug("blocked by server rules", "user", user.Name, "dest", req.Dest.String())
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)

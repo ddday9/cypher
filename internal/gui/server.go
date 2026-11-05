@@ -13,10 +13,14 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/ddday9/cypher/internal/config"
 	"github.com/ddday9/cypher/internal/engine"
+	"github.com/ddday9/cypher/internal/geo"
 	"github.com/ddday9/cypher/internal/links"
+	"github.com/ddday9/cypher/internal/procinfo"
 )
 
 //go:embed web
@@ -78,6 +82,7 @@ func (s *Server) routes() http.Handler {
 		"POST /api/ping":                 s.ping,
 		"POST /api/settings":             s.saveSettings,
 		"POST /api/geo/update":           s.updateGeo,
+		"GET /api/processes":             s.processes,
 		"GET /api/logs":                  s.logs,
 		"POST /api/elevate":              s.elevate,
 		"POST /api/show":                 s.show,
@@ -328,17 +333,44 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errors.New("порты должны быть разными числами от 1 до 65535"))
 		return
 	}
-	if in.Routing == "custom" {
-		// Validate the rules the same way the client will.
-		cfg := s.app.BuildConfig(Profile{Link: links.Link{Server: "example.com:443"}}, in)
-		cfg.Routing.Rules = in.CustomRules
-		if err := validateRules(cfg.Routing); err != nil {
-			writeErr(w, err)
+	rules, _, err := routingRules(in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := s.app.compileRules(rules); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := validateRules(config.RoutingConfig{Rules: in.CustomRules}); err != nil {
+		writeErr(w, err)
+		return
+	}
+	switch in.DefaultAction {
+	case "", "proxy", "direct":
+	default:
+		writeErr(w, errors.New("действие по умолчанию: proxy или direct"))
+		return
+	}
+	if in.GeoSource != "custom" {
+		for _, p := range geo.Presets {
+			if p.ID == in.GeoSource {
+				in.GeositeURL, in.GeoipURL = p.Geosite, p.Geoip
+			}
+		}
+	}
+	for _, u := range []string{in.GeositeURL, in.GeoipURL} {
+		if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
+			writeErr(w, errors.New("ссылки на geosite и geoip должны начинаться с https://"))
 			return
 		}
 	}
+	if in.GeoInterval < 0 || in.GeoInterval > 24*30 {
+		writeErr(w, errors.New("период обновления баз: от 1 часа до 30 дней"))
+		return
+	}
 	var prev Settings
-	err := s.app.store.Update(func(st *State) error {
+	err = s.app.store.Update(func(st *State) error {
 		prev = st.Settings
 		in.GeoUpdated = st.Settings.GeoUpdated
 		st.Settings = in
@@ -356,6 +388,14 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 	if prev.LogLevel != in.LogLevel {
 		s.app.setLogLevel(in.LogLevel)
 	}
+	if (prev.GeositeURL != in.GeositeURL || prev.GeoipURL != in.GeoipURL) && s.app.haveGeo() {
+		// New source: fetch now; a running client applies the files itself.
+		go func() {
+			if err := s.app.UpdateGeo(context.Background()); err != nil {
+				slog.Warn("geo update after source change", "err", err)
+			}
+		}()
+	}
 	if err := s.app.Reconnect(context.Background()); err != nil {
 		writeErr(w, err)
 		return
@@ -369,6 +409,15 @@ func (s *Server) updateGeo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func (s *Server) processes(w http.ResponseWriter, r *http.Request) {
+	ps, err := procinfo.List()
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, ps)
 }
 
 func (s *Server) logs(w http.ResponseWriter, r *http.Request) {

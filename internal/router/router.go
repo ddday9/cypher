@@ -18,6 +18,9 @@ import (
 type Metadata struct {
 	InboundTag string
 	Dest       netx.Destination
+	// Process is the executable path of the program that opened the
+	// connection, if known (see NeedsProcess).
+	Process string
 }
 
 type rule struct {
@@ -26,6 +29,7 @@ type rule struct {
 	ports    PortSet
 	networks map[string]bool
 	inbounds map[string]bool
+	process  []string // lower-case file names or full paths
 	outbound string
 	desc     string
 }
@@ -121,6 +125,15 @@ func compileRule(rc config.RuleConfig, geo *GeoLoader) (*rule, error) {
 			ru.inbounds[t] = true
 		}
 		desc = append(desc, "inboundTag="+strings.Join(rc.InboundTag, ","))
+	}
+	for _, p := range rc.Process {
+		p = strings.ToLower(strings.TrimSpace(strings.ReplaceAll(p, `\`, "/")))
+		if p != "" {
+			ru.process = append(ru.process, p)
+		}
+	}
+	if len(ru.process) > 0 {
+		desc = append(desc, "process="+strings.Join(rc.Process, ","))
 	}
 	if len(desc) == 0 {
 		return nil, fmt.Errorf("rule has no conditions")
@@ -222,6 +235,9 @@ func (ru *rule) match(md Metadata, ips []netip.Addr) bool {
 	if ru.inbounds != nil && !ru.inbounds[md.InboundTag] {
 		return false
 	}
+	if ru.process != nil && !matchProcess(ru.process, md.Process) {
+		return false
+	}
 	if ru.networks != nil && !ru.networks[md.Dest.Network] {
 		return false
 	}
@@ -275,6 +291,35 @@ func (r *Router) Route(ctx context.Context, md Metadata) string {
 	}
 	slog.Debug("route", "dest", md.Dest.String(), "outbound", r.defaultTag, "rule", "default")
 	return r.defaultTag
+}
+
+func matchProcess(want []string, path string) bool {
+	if path == "" {
+		return false
+	}
+	full := strings.ToLower(strings.ReplaceAll(path, `\`, "/"))
+	name := full[strings.LastIndexByte(full, '/')+1:]
+	for _, w := range want {
+		if strings.Contains(w, "/") {
+			if full == w {
+				return true
+			}
+		} else if name == w {
+			return true
+		}
+	}
+	return false
+}
+
+// NeedsProcess reports whether any rule matches by process, so callers only
+// pay for the owner lookup when it matters.
+func (r *Router) NeedsProcess() bool {
+	for _, ru := range r.rules {
+		if ru.process != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // DefaultTag returns the outbound used when no rule matches.

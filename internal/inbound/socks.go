@@ -37,6 +37,7 @@ const (
 
 func (in *Inbound) handleSOCKS(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
+	ctx = netx.WithSource(ctx, "tcp", netx.AddrPortOf(conn.RemoteAddr()))
 	conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	// Greeting: VER NMETHODS METHODS...

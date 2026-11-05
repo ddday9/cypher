@@ -27,9 +27,9 @@ import (
 
 // Handler receives connections captured from the TUN device.
 type Handler interface {
-	// HandleTCP is called for every new TCP connection; dst is the address
-	// the application connected to.
-	HandleTCP(conn net.Conn, dst netip.AddrPort)
+	// HandleTCP is called for every new TCP connection; src is the
+	// application's address, dst the address it connected to.
+	HandleTCP(conn net.Conn, src, dst netip.AddrPort)
 	// HandleUDP is called for every new UDP flow (src, dst). conn reads
 	// datagrams sent by the application and writes replies back to it.
 	HandleUDP(conn net.Conn, src, dst netip.AddrPort)
@@ -91,7 +91,8 @@ func NewStack(dev wgtun.Device, mtu int, h Handler) (*Stack, error) {
 		}
 		r.Complete(false)
 		ep.SocketOptions().SetKeepAlive(true)
-		go h.HandleTCP(gonet.NewTCPConn(&wq, ep), addrPort(id.LocalAddress, id.LocalPort))
+		go h.HandleTCP(gonet.NewTCPConn(&wq, ep),
+			addrPort(id.RemoteAddress, id.RemotePort), addrPort(id.LocalAddress, id.LocalPort))
 	})
 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpFwd.HandlePacket)
 

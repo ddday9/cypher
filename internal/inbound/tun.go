@@ -105,7 +105,8 @@ func (t *tunInbound) isDNS(dst netip.AddrPort) bool {
 }
 
 // HandleTCP implements tun.Handler.
-func (t *tunInbound) HandleTCP(conn net.Conn, dst netip.AddrPort) {
+func (t *tunInbound) HandleTCP(conn net.Conn, src, dst netip.AddrPort) {
+	ctx := netx.WithSource(t.ctx, "tcp", src)
 	dest := netx.Destination{Network: "tcp", Host: dst.Addr().String(), Port: dst.Port()}
 	var c net.Conn = conn
 	if t.isDNS(dst) {
@@ -120,7 +121,7 @@ func (t *tunInbound) HandleTCP(conn net.Conn, dst netip.AddrPort) {
 			dest.Host = domain
 		}
 	}
-	target, err := t.in.dial(t.ctx, dest)
+	target, err := t.in.dial(ctx, dest)
 	if err != nil {
 		conn.Close()
 		return
@@ -138,8 +139,9 @@ func (t *tunInbound) HandleUDP(conn net.Conn, src, dst netip.AddrPort) {
 		dest.Host, dest.Port = t.dnsHijack.Host, t.dnsHijack.Port
 		timeout = dnsFlowTimeout
 	}
-	tag := t.in.d.RoutePacket(t.ctx, t.in.tag, dest)
-	ctx, cancel := context.WithTimeout(t.ctx, 30*time.Second)
+	sctx := netx.WithSource(t.ctx, "udp", src)
+	tag := t.in.d.RoutePacket(sctx, t.in.tag, dest)
+	ctx, cancel := context.WithTimeout(sctx, 30*time.Second)
 	pc, err := t.in.d.ListenPacket(ctx, tag, dest)
 	cancel()
 	if err != nil {

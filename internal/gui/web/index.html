@@ -79,11 +79,29 @@
 
       <h3>Маршрутизация</h3>
       <div id="presetList" class="presets"></div>
-      <div id="customBox" class="card hidden">
-        <label class="label" for="customRules">Правила (JSON, как в Xray)</label>
-        <textarea id="customRules" rows="9" spellcheck="false" class="mono"></textarea>
-        <small class="hint">Пример: [{"domain":["geosite:google"],"outbound":"proxy"},{"ip":["geoip:ru"],"outbound":"direct"}]. Что не совпало — через VPN.</small>
+      <div id="defaultBox" class="card list hidden">
+        <label class="item"><span>Всё остальное</span>
+          <select id="defaultAction"><option value="proxy">Через VPN</option><option value="direct">Напрямую</option></select></label>
       </div>
+
+      <h3>Приложения</h3>
+      <div class="card list">
+        <div id="appList"></div>
+        <div class="item"><span class="hint-inline">Работает в режиме «Весь трафик». В режиме «Прокси» — только для программ, которые сами ходят через прокси.</span></div>
+        <div class="item end"><button id="addAppBtn" class="btn ghost small">+ Добавить приложение</button></div>
+      </div>
+
+      <h3>Мои правила</h3>
+      <div class="card list">
+        <div id="ruleList"></div>
+        <div class="item end"><button id="addRuleBtn" class="btn ghost small">+ Добавить правило</button></div>
+      </div>
+      <small class="hint">Сначала проверяются приложения, затем правила сверху вниз, затем выбранный пресет. Несколько значений в строке — через запятую.</small>
+      <details class="card item-details">
+        <summary>Расширенные правила (JSON, формат Xray)</summary>
+        <textarea id="customRules" rows="8" spellcheck="false" class="mono"></textarea>
+        <small class="hint">Пример: [{"domain":["geosite:google"],"port":"443","outbound":"proxy"}]. Проверяются после «Моих правил».</small>
+      </details>
 
       <h3>Подключение</h3>
       <div class="card list">
@@ -104,13 +122,18 @@
 
       <h3>Базы geosite / geoip</h3>
       <div class="card list">
-        <label class="item"><span>Обновлять автоматически<small id="geoUpdated">—</small></span><input type="checkbox" id="geoAuto" class="switch"></label>
-        <div class="item"><span>Обновить сейчас</span><button id="geoBtn" class="btn ghost small">Обновить</button></div>
-        <details class="item-details">
-          <summary>Источники</summary>
-          <label class="label" for="geositeUrl">geosite.dat</label><input id="geositeUrl" type="url">
-          <label class="label" for="geoipUrl">geoip.dat</label><input id="geoipUrl" type="url">
-        </details>
+        <label class="item"><span>Источник<small id="geoNote"></small></span><select id="geoSource"></select></label>
+        <div id="geoCustom" class="item-details hidden">
+          <label class="label" for="geositeUrl">Ссылка на geosite.dat</label><input id="geositeUrl" type="url" placeholder="https://…/geosite.dat">
+          <label class="label" for="geoipUrl">Ссылка на geoip.dat</label><input id="geoipUrl" type="url" placeholder="https://…/geoip.dat">
+        </div>
+        <label class="item"><span>Обновлять</span>
+          <select id="geoInterval">
+            <option value="6">каждые 6 часов</option><option value="12">каждые 12 часов</option>
+            <option value="24">раз в сутки</option><option value="72">раз в 3 дня</option>
+            <option value="168">раз в неделю</option><option value="0">не обновлять</option>
+          </select></label>
+        <div class="item"><span>Обновить сейчас<small id="geoUpdated">—</small></span><button id="geoBtn" class="btn ghost small">Обновить</button></div>
       </div>
 
       <h3>Приложение</h3>
@@ -138,6 +161,14 @@
     <button data-view="logs" class="tab"><svg viewBox="0 0 24 24"><path d="M5 5h14M5 10h14M5 15h9M5 20h6"/></svg>Логи</button>
   </nav>
   <div id="toast" class="toast hidden"></div>
+  <div id="picker" class="modal hidden" role="dialog" aria-modal="true" aria-label="Выбор приложения">
+    <div class="modal-box">
+      <div class="row between"><b>Добавить приложение</b><button id="pickerClose" class="icon-btn" aria-label="Закрыть">✕</button></div>
+      <input id="pickerSearch" type="text" placeholder="Поиск или имя файла, например dota2.exe">
+      <div id="pickerList" class="picker-list"></div>
+      <div class="row end"><button id="pickerManual" class="btn primary small">Добавить по имени</button></div>
+    </div>
+  </div>
 </div>
 <script src="app.js"></script>
 </body>

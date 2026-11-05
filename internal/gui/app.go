@@ -19,8 +19,10 @@ import (
 
 	"github.com/ddday9/cypher/internal/config"
 	"github.com/ddday9/cypher/internal/engine"
+	"github.com/ddday9/cypher/internal/geo"
 	"github.com/ddday9/cypher/internal/links"
 	"github.com/ddday9/cypher/internal/netx"
+	"github.com/ddday9/cypher/internal/router"
 	"github.com/ddday9/cypher/internal/sysproxy"
 )
 
@@ -167,14 +169,16 @@ func (a *App) BuildConfig(p Profile, s Settings) *config.Config {
 		{Tag: "direct", Type: "direct"},
 		{Tag: "block", Type: "block"},
 	}
-	preset := presetByID(s.Routing)
-	rules := preset.Rules
-	if preset.ID == "custom" {
-		rules = s.CustomRules
+	rules, def, err := routingRules(s)
+	if err != nil {
+		// Validated on save; an invalid stored rule set falls back to the preset.
+		slog.Warn("user rules ignored", "err", err)
+		s.UserRules = nil
+		rules, def, _ = routingRules(s)
 	}
 	cfg.Routing = config.RoutingConfig{
 		Geosite: a.geoPath(geositeFile), Geoip: a.geoPath(geoipFile),
-		Rules: rules, Default: preset.Default,
+		Rules: rules, Default: def,
 	}
 	return cfg
 }
@@ -439,15 +443,17 @@ func ping(ctx context.Context, server string) int {
 
 // Info is static information for the UI.
 type Info struct {
-	Version  string   `json:"version"`
-	OS       string   `json:"os"`
-	Elevated bool     `json:"elevated"`
-	DataDir  string   `json:"dataDir"`
-	Presets  []Preset `json:"presets"`
+	Version    string       `json:"version"`
+	OS         string       `json:"os"`
+	Elevated   bool         `json:"elevated"`
+	DataDir    string       `json:"dataDir"`
+	Presets    []Preset     `json:"presets"`
+	GeoSources []geo.Preset `json:"geoSources"`
 }
 
 func (a *App) Info(version string) Info {
-	return Info{Version: version, OS: runtime.GOOS, Elevated: isElevated(), DataDir: a.dir, Presets: Presets}
+	return Info{Version: version, OS: runtime.GOOS, Elevated: isElevated(), DataDir: a.dir,
+		Presets: Presets, GeoSources: geo.Presets}
 }
 
 // localAddr reports whether a TCP port on 127.0.0.1 is free.
@@ -494,4 +500,48 @@ func (a *App) Settings() Settings { return a.store.Get().Settings }
 // SetMode switches between "proxy" and "tun".
 func (a *App) SetMode(mode string) error {
 	return a.store.Update(func(s *State) error { s.Settings.Mode = mode; return nil })
+}
+
+// compileRules checks rules with the same router the client uses. With the
+// geo files present, unknown geosite/geoip categories are caught too;
+// without them, geo entries are skipped and the rest is checked.
+func (a *App) compileRules(rules []config.RuleConfig) error {
+	if a.haveGeo() {
+		geo := router.NewGeoLoader(a.geoPath(geositeFile), a.geoPath(geoipFile))
+		_, err := router.New(config.RoutingConfig{Rules: rules}, "proxy", geo)
+		return humanRuleError(err)
+	}
+	var plain []config.RuleConfig
+	for _, r := range rules {
+		c := r
+		c.Domain, c.IP = nil, nil
+		for _, d := range r.Domain {
+			if !strings.HasPrefix(d, "geosite:") {
+				c.Domain = append(c.Domain, d)
+			}
+		}
+		for _, ip := range r.IP {
+			if !strings.HasPrefix(ip, "geoip:") {
+				c.IP = append(c.IP, ip)
+			}
+		}
+		if len(c.Domain)+len(c.IP)+len(c.Process)+len(c.InboundTag) > 0 || c.Port != "" || c.Network != "" {
+			plain = append(plain, c)
+		}
+	}
+	_, err := router.New(config.RoutingConfig{Rules: plain}, "proxy", router.NewGeoLoader("", ""))
+	return humanRuleError(err)
+}
+
+func humanRuleError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	msg = strings.Replace(msg, "routing rule #", "правило ", 1)
+	msg = strings.Replace(msg, "invalid IP", "неверный IP", 1)
+	msg = strings.Replace(msg, "invalid CIDR", "неверная сеть", 1)
+	msg = strings.Replace(msg, "invalid port", "неверный порт", 1)
+	msg = strings.Replace(msg, "not found in", "нет в базе", 1)
+	return errors.New(msg)
 }

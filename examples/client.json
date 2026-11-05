@@ -1,8 +1,18 @@
 {
-  "log": { "level": "info" },
+  "log": {
+    "level": "info"
+  },
   "inbounds": [
-    { "tag": "socks", "type": "socks", "listen": "127.0.0.1:10808" },
-    { "tag": "http",  "type": "http",  "listen": "127.0.0.1:10809" }
+    {
+      "tag": "socks",
+      "type": "socks",
+      "listen": "127.0.0.1:10808"
+    },
+    {
+      "tag": "http",
+      "type": "http",
+      "listen": "127.0.0.1:10809"
+    }
   ],
   "outbounds": [
     {
@@ -12,19 +22,50 @@
       "key": "REPLACE_WITH_THE_SAME_KEY_AS_ON_THE_SERVER",
       "fingerprint": "firefox",
       "connections": 2,
-      "rotation": { "age": "5m-20m", "megabytes": "64-512", "idle": "1m-3m" }
+      "rotation": {
+        "age": "5m-20m",
+        "megabytes": "64-512",
+        "idle": "1m-3m"
+      }
     },
-    { "tag": "direct", "type": "direct" },
-    { "tag": "block",  "type": "block" }
+    {
+      "tag": "direct",
+      "type": "direct"
+    },
+    {
+      "tag": "block",
+      "type": "block"
+    }
   ],
   "routing": {
     "geosite": "geosite.dat",
     "geoip": "geoip.dat",
+    "geositeURL": "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat",
+    "geoipURL": "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat",
+    "geoUpdate": "24h",
     "domainStrategy": "AsIs",
     "rules": [
-      { "domain": ["geosite:category-ads-all"], "outbound": "block" },
-      { "domain": ["geosite:category-ru", "domain:ru", "domain:xn--p1ai"], "outbound": "direct" },
-      { "ip": ["geoip:private", "geoip:ru"], "outbound": "direct" }
+      {
+        "domain": [
+          "geosite:category-ads-all"
+        ],
+        "outbound": "block"
+      },
+      {
+        "domain": [
+          "geosite:category-ru",
+          "domain:ru",
+          "domain:xn--p1ai"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "ip": [
+          "geoip:private",
+          "geoip:ru"
+        ],
+        "outbound": "direct"
+      }
     ],
     "default": "proxy"
   }

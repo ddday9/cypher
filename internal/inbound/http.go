@@ -23,6 +23,7 @@ var hopHeaders = []string{
 
 func (in *Inbound) handleHTTP(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
+	ctx = netx.WithSource(ctx, "tcp", netx.AddrPortOf(conn.RemoteAddr()))
 	br := bufio.NewReader(conn)
 
 	var upstream net.Conn

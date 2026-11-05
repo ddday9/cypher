@@ -14,8 +14,10 @@ import (
 
 	"github.com/ddday9/cypher/internal/client"
 	"github.com/ddday9/cypher/internal/config"
+	"github.com/ddday9/cypher/internal/geo"
 	"github.com/ddday9/cypher/internal/inbound"
 	"github.com/ddday9/cypher/internal/netx"
+	"github.com/ddday9/cypher/internal/procinfo"
 	"github.com/ddday9/cypher/internal/router"
 	"github.com/ddday9/cypher/internal/server"
 )
@@ -31,8 +33,20 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		if err != nil {
 			return err
 		}
+		srcs, interval, err := geoSources(cfg)
+		if err != nil {
+			return err
+		}
+		if err := ensureGeo(ctx, srcs); err != nil {
+			slog.Error("geo files unavailable; server routing rules are off until they download", "err", err)
+		}
+		if err := s.SetRouting(cfg.Routing, cfg.Resolve); err != nil {
+			slog.Error("server routing rules not applied", "err", err)
+		}
+		go geo.Run(ctx, srcs, interval)
 		if cfg.Path != "" {
-			go watchServerConfig(ctx, cfg.Path, s, reloadInterval)
+			site, ip := geoPaths(cfg)
+			go watchServerConfig(ctx, cfg.Path, []string{site, ip}, s, reloadInterval)
 		}
 		return s.ListenAndServe(ctx)
 	}
@@ -51,6 +65,9 @@ type Client struct {
 	router    atomic.Pointer[router.Router]
 
 	traffic Traffic
+
+	geoSrcs     []geo.Source
+	geoInterval time.Duration
 
 	reloadMu sync.Mutex
 	watched  []string // files whose changes trigger a routing reload
@@ -79,6 +96,14 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		c.outbounds[oc.Tag] = o
 	}
 
+	srcs, interval, err := geoSources(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureGeo(context.Background(), srcs); err != nil {
+		return nil, err
+	}
+	c.geoSrcs, c.geoInterval = srcs, interval
 	r, watched, err := c.buildRouter(cfg)
 	if err != nil {
 		return nil, err
@@ -100,14 +125,34 @@ func NewClient(cfg *config.Config) (*Client, error) {
 }
 
 // Dispatch implements inbound.Dispatcher.
+// metadata describes a connection for the router, looking up the owning
+// program only when some rule needs it.
+func (c *Client) metadata(ctx context.Context, r *router.Router, inboundTag string, dest netx.Destination) router.Metadata {
+	md := router.Metadata{InboundTag: inboundTag, Dest: dest}
+	if r.NeedsProcess() {
+		if src, ok := netx.SourceFrom(ctx); ok && src.Addr.IsValid() {
+			if p, err := procinfo.Lookup(src.Network, src.Addr); err == nil {
+				md.Process = p
+			}
+		}
+	}
+	return md
+}
+
 func (c *Client) Dispatch(ctx context.Context, inboundTag string, dest netx.Destination) (net.Conn, error) {
-	tag := c.router.Load().Route(ctx, router.Metadata{InboundTag: inboundTag, Dest: dest})
+	r := c.router.Load()
+	md := c.metadata(ctx, r, inboundTag, dest)
+	tag := r.Route(ctx, md)
 	o := c.outbounds[tag]
 	conn, err := o.Dial(ctx, dest)
 	if err != nil {
 		return nil, fmt.Errorf("%s via %s: %w", dest, tag, err)
 	}
-	slog.Info("connect", "dest", dest.String(), "outbound", tag)
+	if md.Process != "" {
+		slog.Info("connect", "dest", dest.String(), "outbound", tag, "process", procinfo.Name(md.Process))
+	} else {
+		slog.Info("connect", "dest", dest.String(), "outbound", tag)
+	}
 	return &countingConn{Conn: conn, t: &c.traffic}, nil
 }
 
@@ -123,7 +168,8 @@ func (c *Client) hasTUN() bool {
 // RoutePacket implements inbound.Dispatcher.
 func (c *Client) RoutePacket(ctx context.Context, inboundTag string, dest netx.Destination) string {
 	dest.Network = "udp"
-	return c.router.Load().Route(ctx, router.Metadata{InboundTag: inboundTag, Dest: dest})
+	r := c.router.Load()
+	return r.Route(ctx, c.metadata(ctx, r, inboundTag, dest))
 }
 
 // ListenPacket implements inbound.Dispatcher.
@@ -164,6 +210,7 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 	}
 	go c.watch(ctx, reloadInterval)
+	go geo.Run(ctx, c.geoSrcs, c.geoInterval)
 	var wg sync.WaitGroup
 	errs := make(chan error, len(c.inbounds))
 	for _, in := range c.inbounds {

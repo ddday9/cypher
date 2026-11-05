@@ -3,12 +3,12 @@ package gui
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/ddday9/cypher/internal/geo"
 )
 
 const (
@@ -27,37 +27,8 @@ func (a *App) haveGeo() bool {
 	return true
 }
 
-// download fetches url into the data directory atomically, so a running
-// client (which watches the file) never sees a half-written file.
-func (a *App) download(ctx context.Context, url, name string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := a.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
-	}
-	tmp, err := os.CreateTemp(a.dir, name+".*.tmp")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), a.geoPath(name))
-}
-
-// UpdateGeo downloads both geo files.
+// UpdateGeo downloads both geo files. A running client picks the new files
+// up by itself, without reconnecting.
 func (a *App) UpdateGeo(ctx context.Context) error {
 	a.geoMu.Lock()
 	defer a.geoMu.Unlock()
@@ -65,7 +36,10 @@ func (a *App) UpdateGeo(ctx context.Context) error {
 	a.setBusy("Загружаю базы geosite и geoip…")
 	defer a.setBusy("")
 	for _, f := range []struct{ url, name string }{{st.GeositeURL, geositeFile}, {st.GeoipURL, geoipFile}} {
-		if err := a.download(ctx, f.url, f.name); err != nil {
+		if f.url == "" {
+			return fmt.Errorf("не задана ссылка на %s", f.name)
+		}
+		if err := geo.Download(ctx, f.url, a.geoPath(f.name)); err != nil {
 			return fmt.Errorf("загрузка %s: %w", f.name, err)
 		}
 	}
@@ -73,13 +47,14 @@ func (a *App) UpdateGeo(ctx context.Context) error {
 	return a.store.Update(func(s *State) error { s.Settings.GeoUpdated = time.Now(); return nil })
 }
 
-// geoLoop refreshes the geo files once a day when enabled.
+// geoLoop refreshes the geo files on the configured period.
 func (a *App) geoLoop(ctx context.Context) {
-	t := time.NewTicker(time.Hour)
+	t := time.NewTicker(15 * time.Minute)
 	defer t.Stop()
 	for {
 		st := a.store.Get().Settings
-		if st.GeoAuto && a.haveGeo() && time.Since(st.GeoUpdated) > 24*time.Hour {
+		period := time.Duration(st.GeoInterval) * time.Hour
+		if st.GeoAuto && period > 0 && a.haveGeo() && time.Since(st.GeoUpdated) > period {
 			if err := a.UpdateGeo(ctx); err != nil {
 				slog.Warn("geo auto-update failed", "err", err)
 			}

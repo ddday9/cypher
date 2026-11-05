@@ -97,6 +97,9 @@ func (s *Server) handleUDP(st *smux.Stream, user *protocol.User) {
 			return
 		}
 		touch()
+		if s.blocked(user.Name, dest) {
+			continue
+		}
 		addr, ok := s.resolveUDP(dest, resolved)
 		if !ok {
 			continue

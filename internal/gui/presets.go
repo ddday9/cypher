@@ -1,6 +1,12 @@
 package gui
 
-import "github.com/ddday9/cypher/internal/config"
+import (
+	"fmt"
+	"strings"
+	"unicode"
+
+	"github.com/ddday9/cypher/internal/config"
+)
 
 // Preset is a ready-made routing scheme.
 type Preset struct {
@@ -42,10 +48,92 @@ var Presets = []Preset{
 		Default: "proxy",
 	},
 	{
-		ID: "custom", Name: "Свои правила",
-		Description: "Правила в формате Xray: domain, ip, port, network → proxy, direct или block.",
+		ID: "custom", Name: "Только мои правила",
+		Description: "Работают только ваши правила и приложения; остальное — по выбранному действию.",
 		Default:     "proxy",
 	},
+}
+
+var ruleTypes = map[string]bool{
+	"domain": true, "full": true, "keyword": true, "geosite": true,
+	"ip": true, "geoip": true, "port": true, "process": true,
+}
+
+// compileUserRules turns editor lines into routing rules. Values of one line
+// are alternatives (OR).
+func compileUserRules(in []UserRule) ([]config.RuleConfig, error) {
+	var out []config.RuleConfig
+	for i, r := range in {
+		if !ruleTypes[r.Type] {
+			return nil, fmt.Errorf("правило %d: неизвестный тип %q", i+1, r.Type)
+		}
+		switch r.Action {
+		case "proxy", "direct", "block":
+		default:
+			return nil, fmt.Errorf("правило %d: действие должно быть proxy, direct или block", i+1)
+		}
+		vals := strings.FieldsFunc(r.Value, func(c rune) bool { return c == ',' || c == ';' || unicode.IsSpace(c) })
+		if r.Type == "process" {
+			// File names may contain spaces only as part of a full path.
+			vals = nil
+			for v := range strings.SplitSeq(r.Value, ",") {
+				if v = strings.TrimSpace(v); v != "" {
+					vals = append(vals, v)
+				}
+			}
+		}
+		if len(vals) == 0 {
+			return nil, fmt.Errorf("правило %d: пустое значение", i+1)
+		}
+		rc := config.RuleConfig{Outbound: r.Action}
+		for _, v := range vals {
+			switch r.Type {
+			case "domain", "full", "keyword", "geosite":
+				rc.Domain = append(rc.Domain, r.Type+":"+strings.TrimPrefix(strings.ToLower(v), r.Type+":"))
+			case "ip":
+				rc.IP = append(rc.IP, v)
+			case "geoip":
+				rc.IP = append(rc.IP, "geoip:"+strings.TrimPrefix(strings.ToLower(v), "geoip:"))
+			case "process":
+				rc.Process = append(rc.Process, v)
+			}
+		}
+		if r.Type == "port" {
+			rc.Port = config.PortList(strings.Join(vals, ","))
+		}
+		out = append(out, rc)
+	}
+	return out, nil
+}
+
+// routingRules assembles the rule list: apps and user rules first, then the
+// advanced JSON rules, then the preset.
+func routingRules(s Settings) ([]config.RuleConfig, string, error) {
+	user, err := compileUserRules(s.UserRules)
+	if err != nil {
+		return nil, "", err
+	}
+	// Application rules go first so that "dota2.exe → direct" wins over a
+	// domain rule for the same traffic.
+	var rules []config.RuleConfig
+	for _, pass := range []bool{true, false} {
+		for _, r := range user {
+			if (len(r.Process) > 0) == pass {
+				rules = append(rules, r)
+			}
+		}
+	}
+	rules = append(rules, s.CustomRules...)
+	p := presetByID(s.Routing)
+	def := p.Default
+	if p.ID == "custom" {
+		if s.DefaultAction != "" {
+			def = s.DefaultAction
+		}
+	} else {
+		rules = append(rules, p.Rules...)
+	}
+	return rules, def, nil
 }
 
 func presetByID(id string) Preset {

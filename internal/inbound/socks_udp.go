@@ -76,7 +76,7 @@ func (a *udpAssoc) serve() {
 		a.client = from
 		a.mu.Unlock()
 
-		out, err := a.outbound(dest)
+		out, err := a.outbound(netx.WithSource(a.ctx, "udp", from), dest)
 		if err != nil {
 			slog.Debug("udp dial failed", "dest", dest.String(), "err", err)
 			continue
@@ -85,14 +85,14 @@ func (a *udpAssoc) serve() {
 	}
 }
 
-func (a *udpAssoc) outbound(dest netx.Destination) (netx.PacketConn, error) {
-	tag := a.in.d.RoutePacket(a.ctx, a.in.tag, dest)
+func (a *udpAssoc) outbound(ctx context.Context, dest netx.Destination) (netx.PacketConn, error) {
+	tag := a.in.d.RoutePacket(ctx, a.in.tag, dest)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if out, ok := a.outs[tag]; ok {
 		return out, nil
 	}
-	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	out, err := a.in.d.ListenPacket(ctx, tag, dest)
 	if err != nil {

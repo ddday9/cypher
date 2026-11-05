@@ -18,14 +18,7 @@ var reloadInterval = 3 * time.Second
 // depends on (the config file and the geo files actually used).
 func (c *Client) buildRouter(cfg *config.Config) (*router.Router, []string, error) {
 	rc := cfg.Routing
-	geosite, geoip := rc.Geosite, rc.Geoip
-	if geosite == "" {
-		geosite = "geosite.dat"
-	}
-	if geoip == "" {
-		geoip = "geoip.dat"
-	}
-	geo := router.NewGeoLoader(cfg.Resolve(geosite), cfg.Resolve(geoip))
+	geo := router.NewGeoLoader(geoPaths(cfg))
 	r, err := router.New(rc, cfg.Outbounds[0].Tag, geo)
 	if err != nil {
 		return nil, nil, err
@@ -144,10 +137,11 @@ func (c *Client) watch(ctx context.Context, interval time.Duration) {
 // watchServerConfig applies user changes from the server config file
 // without a restart: added users can connect, revoked users are
 // disconnected. Other settings still need a restart.
-func watchServerConfig(ctx context.Context, path string, s interface {
+func watchServerConfig(ctx context.Context, path string, geoFiles []string, s interface {
 	SetUsers([]config.UserConfig) error
+	SetRouting(config.RoutingConfig, func(string) string) error
 }, interval time.Duration) {
-	files := []string{path}
+	files := append([]string{path}, geoFiles...)
 	applied := snapshot(files)
 	var pending map[string]fileState
 	t := time.NewTicker(interval)
@@ -175,8 +169,11 @@ func watchServerConfig(ctx context.Context, path string, s interface {
 		}
 		if err := s.SetUsers(cfg.Server.Users); err != nil {
 			slog.Error("server config reload failed, keeping the current users", "err", err)
-			continue
+		} else {
+			slog.Info("users reloaded", "users", len(cfg.Server.Users))
 		}
-		slog.Info("users reloaded", "users", len(cfg.Server.Users))
+		if err := s.SetRouting(cfg.Routing, cfg.Resolve); err != nil {
+			slog.Error("server routing reload failed, keeping the current rules", "err", err)
+		}
 	}
 }

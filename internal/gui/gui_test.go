@@ -144,3 +144,52 @@ func TestConnectWithoutServer(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestUserRules(t *testing.T) {
+	s := defaultSettings()
+	s.Routing = "smart"
+	s.UserRules = []UserRule{
+		{Type: "domain", Value: "example.org, Example.NET", Action: "block"},
+		{Type: "process", Value: "dota2.exe, C:\\Games\\My Game\\game.exe", Action: "direct"},
+		{Type: "port", Value: "27015-27030 3478", Action: "direct"},
+	}
+	rules, def, err := routingRules(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def != "proxy" {
+		t.Fatalf("default %q", def)
+	}
+	// Application rules come first, then user rules, then the preset.
+	if len(rules[0].Process) != 2 || rules[0].Process[1] != `C:\Games\My Game\game.exe` {
+		t.Fatalf("first rule: %+v", rules[0])
+	}
+	if got := rules[1].Domain; len(got) != 2 || got[1] != "domain:example.net" {
+		t.Fatalf("domain rule: %+v", rules[1])
+	}
+	if rules[2].Port != "27015-27030,3478" {
+		t.Fatalf("port rule: %+v", rules[2])
+	}
+	if len(rules) != 3+len(Presets[0].Rules) {
+		t.Fatalf("preset rules not appended: %d", len(rules))
+	}
+	s.Routing, s.DefaultAction = "custom", "direct"
+	if rules, def, _ := routingRules(s); len(rules) != 3 || def != "direct" {
+		t.Fatalf("custom: %d rules, default %q", len(rules), def)
+	}
+	for _, bad := range []UserRule{{Type: "x", Value: "1", Action: "direct"}, {Type: "ip", Value: "", Action: "direct"}, {Type: "ip", Value: "1.1.1.1", Action: "nowhere"}} {
+		if _, _, err := routingRules(Settings{UserRules: []UserRule{bad}}); err == nil {
+			t.Errorf("accepted %+v", bad)
+		}
+	}
+	a, _ := newTestServer(t)
+	bad, _, _ := routingRules(Settings{Routing: "custom", UserRules: []UserRule{{Type: "ip", Value: "300.1.1.1", Action: "direct"}}})
+	if err := a.compileRules(bad); err == nil || !strings.Contains(err.Error(), "неверный IP") {
+		t.Fatalf("compile: %v", err)
+	}
+	// Geo rules are skipped without geo files, the rest is still checked.
+	geoOnly, _, _ := routingRules(Settings{Routing: "custom", UserRules: []UserRule{{Type: "geosite", Value: "google", Action: "proxy"}}})
+	if err := a.compileRules(geoOnly); err != nil {
+		t.Fatalf("geo rule without files: %v", err)
+	}
+}

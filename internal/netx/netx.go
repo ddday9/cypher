@@ -109,3 +109,31 @@ type PacketConn interface {
 	WritePacket(p []byte, to Destination) error
 	Close() error
 }
+
+type sourceKey struct{}
+
+// Source is the local address of the application that opened a connection.
+type Source struct {
+	Network string // "tcp" or "udp"
+	Addr    netip.AddrPort
+}
+
+// WithSource records the application's socket address in ctx.
+func WithSource(ctx context.Context, network string, addr netip.AddrPort) context.Context {
+	return context.WithValue(ctx, sourceKey{}, Source{network, addr})
+}
+
+// SourceFrom returns the address recorded by WithSource.
+func SourceFrom(ctx context.Context) (Source, bool) {
+	s, ok := ctx.Value(sourceKey{}).(Source)
+	return s, ok
+}
+
+// AddrPortOf converts a net.Addr to netip.AddrPort (zero value if unknown).
+func AddrPortOf(a net.Addr) netip.AddrPort {
+	if a == nil {
+		return netip.AddrPort{}
+	}
+	ap, _ := netip.ParseAddrPort(a.String())
+	return ap
+}

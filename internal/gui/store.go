@@ -3,6 +3,7 @@
 package gui
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ddday9/cypher/internal/config"
+	"github.com/ddday9/cypher/internal/geo"
 	"github.com/ddday9/cypher/internal/links"
 )
 
@@ -33,29 +35,41 @@ type Subscription struct {
 
 // Settings are user preferences.
 type Settings struct {
-	Mode        string              `json:"mode"`    // "proxy" or "tun"
-	Routing     string              `json:"routing"` // preset: smart, blocked, global, custom
-	CustomRules []config.RuleConfig `json:"customRules,omitempty"`
-	SystemProxy bool                `json:"systemProxy"`
-	SocksPort   int                 `json:"socksPort"`
-	HTTPPort    int                 `json:"httpPort"`
-	Autostart   bool                `json:"autostart"`
-	AutoConnect bool                `json:"autoConnect"`
-	GeoAuto     bool                `json:"geoAuto"`
-	GeositeURL  string              `json:"geositeUrl"`
-	GeoipURL    string              `json:"geoipUrl"`
-	GeoUpdated  time.Time           `json:"geoUpdated"`
-	Fingerprint string              `json:"fingerprint,omitempty"` // overrides profiles when set
-	LogLevel    string              `json:"logLevel"`
+	Mode        string              `json:"mode"`                  // "proxy" or "tun"
+	Routing     string              `json:"routing"`               // preset: smart, blocked, global, custom
+	UserRules   []UserRule          `json:"userRules,omitempty"`   // checked before the preset
+	CustomRules []config.RuleConfig `json:"customRules,omitempty"` // advanced, Xray JSON
+	// DefaultAction applies with the "custom" preset to everything no rule matched.
+	DefaultAction string    `json:"defaultAction,omitempty"`
+	SystemProxy   bool      `json:"systemProxy"`
+	SocksPort     int       `json:"socksPort"`
+	HTTPPort      int       `json:"httpPort"`
+	Autostart     bool      `json:"autostart"`
+	AutoConnect   bool      `json:"autoConnect"`
+	GeoAuto       bool      `json:"geoAuto"`
+	GeoSource     string    `json:"geoSource"`        // preset ID or "custom"
+	GeoInterval   int       `json:"geoIntervalHours"` // refresh period
+	GeositeURL    string    `json:"geositeUrl"`
+	GeoipURL      string    `json:"geoipUrl"`
+	GeoUpdated    time.Time `json:"geoUpdated"`
+	Fingerprint   string    `json:"fingerprint,omitempty"` // overrides profiles when set
+	LogLevel      string    `json:"logLevel"`
 }
 
 func defaultSettings() Settings {
 	return Settings{
 		Mode: "proxy", Routing: "smart", SystemProxy: true,
 		SocksPort: 10808, HTTPPort: 10809, GeoAuto: true, LogLevel: "info",
-		GeositeURL: "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat",
-		GeoipURL:   "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat",
+		GeoSource: geo.Presets[0].ID, GeoInterval: 24,
+		GeositeURL: geo.Presets[0].Geosite, GeoipURL: geo.Presets[0].Geoip,
 	}
+}
+
+// UserRule is one line of the rule editor.
+type UserRule struct {
+	Type   string `json:"type"`   // domain, full, keyword, geosite, ip, geoip, port, process
+	Value  string `json:"value"`  // several values separated by commas or spaces
+	Action string `json:"action"` // proxy, direct, block
 }
 
 // State is everything persisted to disk.
@@ -94,6 +108,12 @@ func OpenStore(dir string) (*Store, error) {
 			// Keep the broken file for the user and start fresh.
 			os.Rename(filepath.Join(dir, "state.json"), filepath.Join(dir, "state.broken.json"))
 			s.st = State{Settings: defaultSettings()}
+		}
+		// Fields added after the state was saved keep their defaults, since
+		// unmarshalling only overwrites what the file contains. A file from a
+		// version without geo sources has its own URLs: treat them as custom.
+		if !bytes.Contains(b, []byte(`"geoSource"`)) {
+			s.st.Settings.GeoSource = "custom"
 		}
 	}
 	return s, nil
