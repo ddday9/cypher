@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ddday9/cypher/internal/geo"
+	"github.com/ddday9/cypher/internal/router"
 )
 
 const (
@@ -64,4 +65,32 @@ func (a *App) geoLoop(ctx context.Context) {
 		case <-t.C:
 		}
 	}
+}
+
+// GeoCategories lists the geosite and geoip categories of the current
+// files, for suggestions in the rule editor. Cached until the files change.
+func (a *App) GeoCategories() (site, ip []string) {
+	a.catMu.Lock()
+	defer a.catMu.Unlock()
+	load := func(name string, c *catCache) []string {
+		st, err := os.Stat(a.geoPath(name))
+		if err != nil {
+			return nil
+		}
+		if c.list == nil || !st.ModTime().Equal(c.mod) || st.Size() != c.size {
+			list, err := router.Categories(a.geoPath(name))
+			if err != nil {
+				return c.list
+			}
+			c.list, c.mod, c.size = list, st.ModTime(), st.Size()
+		}
+		return c.list
+	}
+	return load(geositeFile, &a.catSite), load(geoipFile, &a.catIP)
+}
+
+type catCache struct {
+	list []string
+	mod  time.Time
+	size int64
 }

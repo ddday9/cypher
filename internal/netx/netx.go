@@ -129,6 +129,20 @@ func SourceFrom(ctx context.Context) (Source, bool) {
 	return s, ok
 }
 
+type originalKey struct{}
+
+// WithOriginal records the address an application connected to, when the
+// destination was replaced by a sniffed domain name for routing.
+func WithOriginal(ctx context.Context, addr netip.AddrPort) context.Context {
+	return context.WithValue(ctx, originalKey{}, addr)
+}
+
+// OriginalFrom returns the address recorded by WithOriginal.
+func OriginalFrom(ctx context.Context) (netip.AddrPort, bool) {
+	a, ok := ctx.Value(originalKey{}).(netip.AddrPort)
+	return a, ok && a.IsValid()
+}
+
 // AddrPortOf converts a net.Addr to netip.AddrPort (zero value if unknown).
 func AddrPortOf(a net.Addr) netip.AddrPort {
 	if a == nil {

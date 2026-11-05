@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/ddday9/cypher/internal/config"
@@ -204,5 +205,18 @@ func TestIPSetMerge(t *testing.T) {
 		if s.Contains(netip.MustParseAddr(a)) {
 			t.Errorf("%s should not match", a)
 		}
+	}
+}
+
+func TestCategories(t *testing.T) {
+	site, ip := writeGeo(t)
+	if got, err := Categories(site); err != nil || !slices.Equal(got, []string{"category-ru", "google"}) {
+		t.Fatalf("geosite: %v %v", got, err)
+	}
+	if got, err := Categories(ip); err != nil || !slices.Equal(got, []string{"private", "ru"}) {
+		t.Fatalf("geoip: %v %v", got, err)
+	}
+	if _, err := Categories(filepath.Join(t.TempDir(), "missing.dat")); err == nil {
+		t.Fatal("missing file")
 	}
 }

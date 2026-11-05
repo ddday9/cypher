@@ -118,7 +118,12 @@ func (t *tunInbound) HandleTCP(conn net.Conn, src, dst netip.AddrPort) {
 		}
 		if domain != "" {
 			slog.Debug("sniffed", "ip", dst.String(), "domain", domain)
+			// The domain is for routing (and for the server, which resolves
+			// it near itself). A direct connection goes to the address the
+			// app chose: resolving again would cost a DNS round trip through
+			// the tunnel and could pick a CDN node near the server.
 			dest.Host = domain
+			ctx = netx.WithOriginal(ctx, dst)
 		}
 	}
 	target, err := t.in.dial(ctx, dest)

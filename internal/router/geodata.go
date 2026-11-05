@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"slices"
+	"sort"
 	"strings"
 
 	"google.golang.org/protobuf/encoding/protowire"
@@ -298,4 +300,22 @@ func (g *GeoLoader) UsedFiles() []string {
 		files = append(files, g.ipPath)
 	}
 	return files
+}
+
+// Categories returns the category names in a geosite.dat or geoip.dat file
+// (lower case, sorted), for suggestions in the rule editor.
+func Categories(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	err = forEachEntry(data, func(code string, _ []byte) bool {
+		if code != "" {
+			out = append(out, strings.ToLower(code))
+		}
+		return false
+	})
+	sort.Strings(out)
+	return slices.Compact(out), err
 }

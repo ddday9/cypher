@@ -202,3 +202,10 @@ details.card textarea { width: 100%; margin-top: 8px; background: var(--bg2); bo
 .proxy-card .row { display: flex; gap: 8px; }
 #ruAppsList { font-size: 12px; line-height: 1.5; word-break: break-word; padding: 8px 12px; }
 .pick small { color: var(--muted); font-size: 11px; }
+
+/* geosite / geoip suggestions */
+.suggest { position: fixed; z-index: 50; max-height: 240px; overflow-y: auto; background: var(--card); border: 1px solid var(--line, rgba(255,255,255,.12)); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.35); padding: 4px; }
+.sg-item { padding: 6px 10px; border-radius: 6px; cursor: pointer; font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 12px; }
+.sg-item b { color: var(--accent, #4c8dff); font-weight: 700; }
+.sg-item.active, .sg-item:hover { background: rgba(127,127,127,.18); }
+.sg-note { padding: 6px 10px; color: var(--muted); font-size: 12px; }

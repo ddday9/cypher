@@ -42,8 +42,11 @@ type App struct {
 	proxySave *sysproxy.Saved
 	geoMu     sync.Mutex
 	pings     map[string]int // profile ID → ms (-1 = failed)
-	activeID  string
-	mode      string
+
+	catMu          sync.Mutex // geo categories for the rule editor
+	catSite, catIP catCache
+	activeID       string
+	mode           string
 }
 
 // NewApp opens the state in dir and prepares logging.

@@ -55,7 +55,11 @@ type Direct struct{ tag string }
 func (d *Direct) Tag() string  { return d.tag }
 func (d *Direct) Close() error { return nil }
 func (d *Direct) Dial(ctx context.Context, dest netx.Destination) (net.Conn, error) {
-	return netx.NewDialer(10*time.Second).DialContext(ctx, "tcp", dest.String())
+	addr := dest.String()
+	if orig, ok := netx.OriginalFrom(ctx); ok && orig.Port() == dest.Port {
+		addr = orig.String() // TUN: the domain was only sniffed for routing
+	}
+	return netx.NewDialer(10*time.Second).DialContext(ctx, "tcp", addr)
 }
 
 // Block refuses every connection.

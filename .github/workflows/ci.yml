@@ -41,7 +41,7 @@ jobs:
         shell: bash
         env:
           CYPHER_TUN_TEST: "1"
-        run: go test -count=1 -run 'TestWindowsTUN|TestTunnel|TestRelay' -v ./internal/app/
+        run: go test -count=1 -run 'TestWindowsTUN|TestWindowsTUNDirect|TestTunnel' -v ./internal/app/
 
   android:
     runs-on: ubuntu-latest

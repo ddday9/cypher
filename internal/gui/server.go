@@ -120,6 +120,7 @@ func (s *Server) routes() http.Handler {
 		"POST /api/ping":                 s.ping,
 		"POST /api/settings":             s.saveSettings,
 		"POST /api/geo/update":           s.updateGeo,
+		"GET /api/geo/categories":        s.geoCategories,
 		"GET /api/processes":             s.processes,
 		"GET /api/logs":                  s.logs,
 		"POST /api/elevate":              s.elevate,
@@ -471,6 +472,17 @@ func (s *Server) updateGeo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func (s *Server) geoCategories(w http.ResponseWriter, r *http.Request) {
+	site, ip := s.app.GeoCategories()
+	if site == nil {
+		site = []string{}
+	}
+	if ip == nil {
+		ip = []string{}
+	}
+	writeJSON(w, map[string][]string{"geosite": site, "geoip": ip})
 }
 
 func (s *Server) processes(w http.ResponseWriter, r *http.Request) {

@@ -381,6 +381,128 @@ const RULE_TYPES = [
 const ACTIONS = [["proxy", "Через VPN"], ["direct", "Напрямую"], ["block", "Блокировать"]];
 const ACTIONS_SHORT = [["proxy", "VPN"], ["direct", "Напрямую"], ["block", "Блок"]];
 
+// --- geosite / geoip suggestions --------------------------------------------------
+
+// Category names come from the downloaded geosite.dat / geoip.dat, so they
+// always match the selected source.
+let geoCats = null;
+async function loadGeoCats(force) {
+  if (!geoCats || force) geoCats = await api("geo/categories").catch(() => ({ geosite: [], geoip: [] }));
+  return geoCats;
+}
+
+const SUGGEST_MIN = { geosite: 2, geoip: 1 }; // country codes have two letters
+const SUGGEST_MAX = 40;
+let suggestFor = null; // the input the list belongs to
+
+function closeSuggest() {
+  $("suggest").classList.add("hidden");
+  suggestFor = null;
+}
+
+// The value being typed: the text after the last comma or space, without
+// a "geosite:" / "geoip:" prefix.
+function currentToken(input) {
+  const v = input.value;
+  const start = Math.max(v.lastIndexOf(","), v.lastIndexOf(" "), v.lastIndexOf(";")) + 1;
+  let token = v.slice(start).trim();
+  token = token.replace(/^(geosite|geoip):/i, "");
+  return { start, token: token.toLowerCase() };
+}
+
+function matches(list, token) {
+  const prefix = [], inside = [];
+  for (const c of list) {
+    if (c.startsWith(token)) prefix.push(c);
+    else if (c.includes(token)) inside.push(c);
+    if (prefix.length >= SUGGEST_MAX) break;
+  }
+  return prefix.concat(inside).slice(0, SUGGEST_MAX);
+}
+
+async function updateSuggest(input, kind) {
+  const { token } = currentToken(input);
+  const cats = await loadGeoCats();
+  const list = cats[kind] || [];
+  const box = $("suggest");
+  if (token.length < SUGGEST_MIN[kind]) {
+    if (!list.length && token.length > 0) showSuggestNote(input, "Базы geosite/geoip ещё не скачаны — подсказок нет.");
+    else closeSuggest();
+    return;
+  }
+  const found = matches(list, token);
+  if (!found.length) {
+    showSuggestNote(input, list.length ? "Нет такой категории в выбранной базе" : "Базы geosite/geoip ещё не скачаны — подсказок нет.");
+    return;
+  }
+  box.replaceChildren(...found.map((c, i) => {
+    const item = el("div", { class: "sg-item" + (i === 0 ? " active" : ""), role: "option" }, highlight(c, token));
+    item.addEventListener("mousedown", (e) => { e.preventDefault(); acceptSuggest(input, c); });
+    return item;
+  }));
+  placeSuggest(input);
+}
+
+function highlight(text, token) {
+  const i = text.indexOf(token);
+  if (i < 0) return text;
+  const frag = document.createDocumentFragment();
+  frag.append(text.slice(0, i), el("b", {}, text.slice(i, i + token.length)), text.slice(i + token.length));
+  return frag;
+}
+
+function showSuggestNote(input, text) {
+  $("suggest").replaceChildren(el("div", { class: "sg-note" }, text));
+  placeSuggest(input);
+}
+
+function placeSuggest(input) {
+  const box = $("suggest");
+  const r = input.getBoundingClientRect();
+  box.style.left = r.left + "px";
+  box.style.top = r.bottom + 2 + "px";
+  box.style.width = Math.max(r.width, 200) + "px";
+  box.classList.remove("hidden");
+  suggestFor = input;
+}
+
+function acceptSuggest(input, value) {
+  const { start } = currentToken(input);
+  let before = input.value.slice(0, start);
+  if (before && !before.endsWith(" ")) before += " "; // "youtube," → "youtube, google"
+  input.value = before + value;
+  input.dispatchEvent(new Event("input"));
+  closeSuggest();
+  input.focus();
+}
+
+function attachSuggest(input, kind) {
+  input.setAttribute("autocomplete", "off");
+  input.addEventListener("input", () => updateSuggest(input, kind));
+  input.addEventListener("focus", () => updateSuggest(input, kind));
+  input.addEventListener("blur", () => setTimeout(() => { if (suggestFor === input) closeSuggest(); }, 100));
+  input.addEventListener("keydown", (e) => {
+    if (suggestFor !== input) return;
+    const items = [...$("suggest").querySelectorAll(".sg-item")];
+    if (!items.length) return;
+    let i = items.findIndex((x) => x.classList.contains("active"));
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      items[i]?.classList.remove("active");
+      i = (i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+      items[i].classList.add("active");
+      items[i].scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      if (i >= 0) { e.preventDefault(); acceptSuggest(input, items[i].textContent); }
+    } else if (e.key === "Escape") {
+      closeSuggest();
+    }
+  });
+}
+
+document.querySelector("main").addEventListener("scroll", closeSuggest, true);
+window.addEventListener("resize", closeSuggest);
+
 function select(options, value, onchange) {
   const sel = el("select", {});
   for (const [v, label] of options) {
@@ -458,6 +580,7 @@ function renderRules() {
     const type = RULE_TYPES.find((t) => t[0] === r.type) || RULE_TYPES[0];
     const input = el("input", { type: "text", value: r.value, placeholder: type[2], spellcheck: "false" });
     input.addEventListener("input", () => { r.value = input.value; settingsDirty = true; });
+    if (r.type === "geosite" || r.type === "geoip") attachSuggest(input, r.type);
     return el("div", { class: "rule" },
       select(RULE_TYPES.map((t) => [t[0], t[1]]), r.type, (v) => { r.type = v; renderRules(); }),
       input,
@@ -566,6 +689,7 @@ $("saveBtn").addEventListener("click", (e) => busy(e.target, async () => {
 $("geoBtn").addEventListener("click", (e) => busy(e.target, async () => {
   toast("Загружаю базы…");
   await api("geo/update", {});
+  geoCats = null; // new files, new category list
   toast("Базы обновлены");
   await refresh();
   if (!settingsDirty) fillSettings();
