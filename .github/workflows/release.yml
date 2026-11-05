@@ -88,7 +88,7 @@ jobs:
           NEVIO_KEY_PASSWORD: ${{ secrets.NEVIO_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          { yes || true; } | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0" > /dev/null
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
           go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
           export PATH="$PATH:$(go env GOPATH)/bin"

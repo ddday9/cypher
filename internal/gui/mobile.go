@@ -167,10 +167,10 @@ func mobileInbounds(m Mobile, s Settings) ([]config.InboundConfig, error) {
 	vs, _ := json.Marshal(mobileVPN(s))
 	fd, err := m.OpenTUN(string(vs))
 	if err != nil {
-		return nil, fmt.Errorf("VPN: %w", err)
+		return nil, fmt.Errorf("не удалось включить VPN: %w", err)
 	}
 	if fd <= 0 {
-		return nil, errors.New("VPN: no permission (allow nevio to create a VPN)")
+		return nil, errors.New("нет разрешения Android на VPN: отключитесь и нажмите кнопку подключения ещё раз — Android спросит разрешение")
 	}
 	return []config.InboundConfig{{Tag: "tun", Type: "tun", FD: fd, Address: mobileAddr4,
 		Address6: mobileAddr6, MTU: mobileMTU}}, nil
