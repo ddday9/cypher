@@ -1,0 +1,38 @@
+# cypher server in Docker.
+#
+#   1. Point your domain (A record) at this server; open TCP port 443.
+#   2. echo "CYPHER_DOMAIN=example.com" > .env   (optionally CYPHER_EMAIL=you@example.com)
+#   3. docker compose up -d && docker compose logs cypher   ← the client link is printed here
+#
+# The certificate is obtained from Let's Encrypt automatically on port 443
+# (TLS-ALPN-01), so nothing else (nginx, certbot, port 80) is needed.
+name: cypher
+
+services:
+  cypher:
+    image: ghcr.io/ddday9/cypher:latest
+    # To build on the server instead of pulling: docker compose build
+    build:
+      context: ../..
+    container_name: cypher
+    restart: unless-stopped
+    ports:
+      - "443:8443/tcp"
+    environment:
+      CYPHER_DOMAIN: ${CYPHER_DOMAIN:?set CYPHER_DOMAIN in .env}
+      CYPHER_EMAIL: ${CYPHER_EMAIL:-}
+    volumes:
+      # Config with user keys and the certificate cache.
+      - cypher-data:/etc/cypher
+      # The website shown to everyone without a key. Put an index.html here.
+      - ./site:/var/www/cypher:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  cypher-data:

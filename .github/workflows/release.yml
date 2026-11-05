@@ -1,0 +1,123 @@
+name: release
+# Push a tag like v0.1.0 to build everything and publish a GitHub release
+# plus the server image ghcr.io/<owner>/cypher.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./... && GOOS=windows go vet ./...
+      - run: go test -race ./...
+
+  binaries:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Command-line binaries
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 windows/amd64; do
+            os=${target%/*}; arch=${target#*/}
+            name="cypher-$VERSION-$os-$arch"
+            out="build/$name"
+            mkdir -p "$out"
+            ext=""; [ "$os" = windows ] && ext=".exe"
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" -o "$out/cypher$ext" ./cmd/cypher
+            cp -r examples "$out/"
+            cp README.md "$out/"
+            if [ "$os" = linux ]; then
+              cp -r deploy "$out/"
+              tar -C build -czf "dist/$name.tar.gz" "$name"
+            else
+              (cd build && zip -qr "../dist/$name.zip" "$name")
+            fi
+          done
+
+      - name: Desktop client (Windows)
+        run: |
+          set -euo pipefail
+          # Icon and manifest for the executable.
+          (cd cmd/cypher-gui && go run github.com/tc-hib/go-winres@v0.3.3 simply \
+            --icon assets/app.ico --manifest gui --arch amd64 \
+            --product-name cypher --file-description "cypher VPN client" \
+            --original-filename cypher-gui.exe --file-version "${VERSION#v}" --product-version "${VERSION#v}")
+          make gui VERSION="$VERSION"
+          cp bin/cypher-gui.exe "dist/cypher-gui-$VERSION-windows-amd64.exe"
+
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          cat > notes.md <<NOTES
+          ## Клиент для Windows
+          \`cypher-gui-$VERSION-windows-amd64.exe\` — графический клиент (Wintun встроен). Положите в отдельную папку и запустите.
+
+          ## Сервер в Docker
+          \`\`\`
+          docker pull ghcr.io/$owner/cypher:$VERSION
+          \`\`\`
+          Инструкция: [docs/docker.md](https://github.com/$GITHUB_REPOSITORY/blob/$VERSION/docs/docker.md).
+
+          ## Остальное
+          * \`cypher-$VERSION-linux-*.tar.gz\` — бинарник, скрипты \`deploy/\` (в том числе docker-compose), примеры конфигов.
+          * \`cypher-$VERSION-windows-amd64.zip\` — консольный клиент.
+          * \`SHA256SUMS\` — контрольные суммы.
+          NOTES
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/* --clobber
+          else
+            gh release create "$VERSION" dist/* --title "cypher $VERSION" --notes-file notes.md --verify-tag
+          fi
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Image name
+        id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cypher" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ github.ref_name }}
+          tags: |
+            ${{ steps.name.outputs.image }}:${{ github.ref_name }}
+            ${{ steps.name.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}

@@ -29,13 +29,28 @@ type LogConfig struct {
 }
 
 type ServerConfig struct {
-	Listen   string         `json:"listen"`   // e.g. ":443"
-	CertFile string         `json:"certFile"` // fullchain.pem
-	KeyFile  string         `json:"keyFile"`  // privkey.pem
+	Listen   string `json:"listen"`             // e.g. ":443"
+	CertFile string `json:"certFile,omitempty"` // fullchain.pem
+	KeyFile  string `json:"keyFile,omitempty"`  // privkey.pem
+	// ACME obtains and renews a certificate automatically (Let's Encrypt by
+	// default) instead of certFile/keyFile. It uses the TLS-ALPN-01
+	// challenge on the listen port, so port 80 is not needed — but the
+	// server must be reachable on port 443 from the internet.
+	ACME     *ACMEConfig    `json:"acme,omitempty"`
 	Users    []UserConfig   `json:"users"`
 	Fallback FallbackConfig `json:"fallback"`
 	// AllowPrivate lets clients reach loopback/LAN addresses of the server.
 	AllowPrivate bool `json:"allowPrivate"`
+}
+
+type ACMEConfig struct {
+	Domain   string `json:"domain"`
+	Email    string `json:"email,omitempty"`
+	CacheDir string `json:"cacheDir,omitempty"` // where certificates are stored; default "acme" next to the config
+	// DirectoryURL selects another ACME CA (e.g. Let's Encrypt staging);
+	// CA is an extra root (PEM) to trust when talking to it.
+	DirectoryURL string `json:"directoryURL,omitempty"`
+	CA           string `json:"ca,omitempty"`
 }
 
 type UserConfig struct {

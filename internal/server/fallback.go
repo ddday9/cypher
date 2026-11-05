@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,7 +44,7 @@ func newFallback(cfg config.FallbackConfig) (*fallback, error) {
 		}
 		h = rp
 	case cfg.Dir != "":
-		h = http.FileServer(http.Dir(cfg.Dir))
+		h = siteHandler(cfg.Dir)
 	default:
 		h = http.HandlerFunc(defaultPage)
 	}
@@ -76,6 +79,39 @@ func (f *fallback) serve(conn *tls.Conn, prefix []byte) {
 
 func (f *fallback) close() {
 	f.h1.Close()
+}
+
+// siteHandler serves static files from dir like a plain web server: no
+// directory listings, and the built-in page while dir has no index.html
+// (so an empty mounted folder still looks like a site).
+func siteHandler(dir string) http.Handler {
+	files := http.FileServer(noListFS{http.Dir(dir)})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := os.Stat(filepath.Join(dir, "index.html")); err != nil {
+			defaultPage(w, r)
+			return
+		}
+		files.ServeHTTP(w, r)
+	})
+}
+
+// noListFS hides directories that have no index.html.
+type noListFS struct{ fs http.FileSystem }
+
+func (n noListFS) Open(name string) (http.File, error) {
+	f, err := n.fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if st, err := f.Stat(); err == nil && st.IsDir() {
+		idx, err := n.fs.Open(strings.TrimSuffix(name, "/") + "/index.html")
+		if err != nil {
+			f.Close()
+			return nil, os.ErrNotExist
+		}
+		idx.Close()
+	}
+	return f, nil
 }
 
 const defaultHTML = `<!DOCTYPE html>

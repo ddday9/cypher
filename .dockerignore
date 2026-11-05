@@ -1,0 +1,5 @@
+.git
+bin
+docs
+*.dat
+cmd/cypher-gui/assets/wintun.dll

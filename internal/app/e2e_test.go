@@ -365,3 +365,44 @@ func TestFingerprints(t *testing.T) {
 		o.Close()
 	}
 }
+
+func TestFallbackSite(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile, pool := writeCert(t, dir)
+	site := filepath.Join(dir, "site")
+	os.MkdirAll(filepath.Join(site, "sub"), 0o755)
+	s, err := server.New(&config.ServerConfig{
+		CertFile: certFile, KeyFile: keyFile,
+		Users:    []config.UserConfig{{Key: protocol.GenerateKey().String()}},
+		Fallback: config.FallbackConfig{Dir: site},
+	}, func(p string) string { return p })
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Serve(ctx, ln)
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	hc := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	get := func(path string) (int, string) {
+		resp, err := hc.Get("https://localhost:" + port + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	// Empty folder: the built-in page, not a directory listing.
+	if code, body := get("/"); code != 200 || !strings.Contains(body, "Welcome") {
+		t.Fatalf("empty site: %d %q", code, body)
+	}
+	os.WriteFile(filepath.Join(site, "index.html"), []byte("<h1>My site</h1>"), 0o644)
+	if code, body := get("/"); code != 200 || !strings.Contains(body, "My site") {
+		t.Fatalf("site: %d %q", code, body)
+	}
+	if code, _ := get("/sub/"); code != 404 {
+		t.Fatalf("directory listing exposed: %d", code)
+	}
+}

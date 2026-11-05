@@ -18,6 +18,9 @@ make linux windows
 
 ## 2. Сервер (Linux)
 
+**Рекомендуемый способ — Docker:** см. [docker.md](docker.md). Ниже —
+установка без Docker, как служба systemd.
+
 ### Быстро: скрипт
 
 Скопируйте на сервер бинарник и папку `deploy/` (например, `scp -r bin deploy user@server:`),

@@ -17,6 +17,7 @@ import (
 	"github.com/ddday9/cypher/internal/netx"
 	"github.com/ddday9/cypher/internal/protocol"
 	"github.com/xtaci/smux"
+	"golang.org/x/crypto/acme"
 )
 
 const (
@@ -53,12 +54,25 @@ func New(cfg *config.ServerConfig, resolve func(string) string) (*Server, error)
 		}
 		users = append(users, protocol.User{Name: name, Key: k})
 	}
-	if cfg.CertFile == "" || cfg.KeyFile == "" {
-		return nil, errors.New("server: certFile and keyFile are required")
-	}
-	certs, err := newCertReloader(resolve(cfg.CertFile), resolve(cfg.KeyFile))
-	if err != nil {
-		return nil, err
+	var getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error)
+	nextProtos := []string{"h2", "http/1.1"}
+	switch {
+	case cfg.ACME != nil:
+		g, err := newACME(cfg.ACME, resolve)
+		if err != nil {
+			return nil, err
+		}
+		getCert = g
+		// Lets the CA validate the domain on this port (TLS-ALPN-01).
+		nextProtos = append(nextProtos, acme.ALPNProto)
+	case cfg.CertFile != "" && cfg.KeyFile != "":
+		certs, err := newCertReloader(resolve(cfg.CertFile), resolve(cfg.KeyFile))
+		if err != nil {
+			return nil, err
+		}
+		getCert = certs.get
+	default:
+		return nil, errors.New("server: set acme.domain, or certFile and keyFile")
 	}
 	fbCfg := cfg.Fallback
 	if fbCfg.Dir != "" {
@@ -75,8 +89,8 @@ func New(cfg *config.ServerConfig, resolve func(string) string) (*Server, error)
 	return &Server{
 		listen: listen,
 		tlsConfig: &tls.Config{
-			GetCertificate: certs.get,
-			NextProtos:     []string{"h2", "http/1.1"},
+			GetCertificate: getCert,
+			NextProtos:     nextProtos,
 			MinVersion:     tls.VersionTLS12,
 		},
 		auth:         protocol.NewAuthenticator(users),
@@ -126,6 +140,10 @@ func (s *Server) handleConn(raw net.Conn) {
 	if err := tc.Handshake(); err != nil {
 		slog.Debug("tls handshake failed", "remote", raw.RemoteAddr().String(), "err", err)
 		raw.Close()
+		return
+	}
+	if tc.ConnectionState().NegotiatedProtocol == acme.ALPNProto {
+		tc.Close() // an ACME validation handshake; nothing follows
 		return
 	}
 	tc.SetDeadline(time.Now().Add(authTimeout))

@@ -27,6 +27,10 @@ Usage:
   cypher genkey               generate a user key
   cypher link -server example.com:443 -key KEY [-name NAME] [-sni NAME] [-fp firefox]
                               print a cypher:// link for the desktop client
+  cypher serve [-c FILE]      run a server; on first start creates the config
+                              from CYPHER_DOMAIN / CYPHER_EMAIL (for Docker)
+  cypher adduser -c FILE -name NAME   add a user and print its link
+  cypher links -c FILE        print the links of all users
   cypher version              print the version
 `
 
@@ -42,6 +46,12 @@ func main() {
 		fmt.Println(protocol.GenerateKey().String())
 	case "link":
 		os.Exit(makeLink(os.Args[2:]))
+	case "serve":
+		os.Exit(serve(os.Args[2:]))
+	case "adduser":
+		os.Exit(addUser(os.Args[2:]))
+	case "links":
+		os.Exit(printLinks(os.Args[2:]))
 	case "version", "-v", "--version":
 		fmt.Println("cypher", version)
 	case "help", "-h", "--help":
