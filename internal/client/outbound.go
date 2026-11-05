@@ -4,12 +4,12 @@ package client
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
-	mrand "math/rand/v2"
 	"net"
 	"net/netip"
 	"os"
@@ -73,6 +73,11 @@ func (b *Block) ListenPacket(context.Context, netx.Destination) (netx.PacketConn
 	return nil, ErrBlocked
 }
 
+// deadServerTimeout: a tunnel with open streams that has heard nothing from
+// the server for this long is closed (servers send keepalives at most 40 s
+// apart while streams are open).
+const deadServerTimeout = 2 * time.Minute
+
 var fingerprints = map[string]utls.ClientHelloID{
 	"":        utls.HelloFirefox_Auto, // default
 	"chrome":  utls.HelloChrome_Auto,
@@ -81,9 +86,12 @@ var fingerprints = map[string]utls.ClientHelloID{
 	"edge":    utls.HelloEdge_Auto,
 	"ios":     utls.HelloIOS_Auto,
 	"android": utls.HelloAndroid_11_OkHttp,
-	// "random" picks one of the real browser profiles above for every new
-	// connection (uTLS's fully randomized hello does not look like any
-	// browser and sometimes fails the handshake).
+	// "random" picks one of the real browser profiles in randomPool, derived
+	// from the key and the server: different users of one server look like
+	// different browsers, but each one keeps its fingerprint across
+	// connections and restarts. (A client whose fingerprint changes while
+	// it is being throttled was reported to get a 600 s ban; uTLS's fully
+	// randomized hello looks like no browser and sometimes fails.)
 	"random": {},
 }
 
@@ -168,6 +176,11 @@ func newCypher(cfg config.OutboundConfig, resolve func(string) string) (*Cypher,
 	if !ok {
 		return nil, fmt.Errorf("cypher outbound: unknown fingerprint %q", cfg.Fingerprint)
 	}
+	if hello == (utls.ClientHelloID{}) {
+		h := sha256.Sum256(append([]byte(cfg.Server+"\x00"+cfg.ServerName+"\x00"), key[:]...))
+		hello = randomPool[int(h[0])%len(randomPool)]
+		slog.Info("fingerprint chosen", "outbound", cfg.Tag, "fingerprint", hello.Client)
+	}
 	c := &Cypher{
 		tag:        cfg.Tag,
 		server:     cfg.Server,
@@ -204,7 +217,16 @@ func newCypher(cfg config.OutboundConfig, resolve func(string) string) (*Cypher,
 	if cfg.AntiFreezeRate > 0 {
 		c.seg.rate = cfg.AntiFreezeRate
 	}
-	c.pool = newPool(c.tag, cfg.Connections, rot, c.connect)
+	size := cfg.Connections
+	if cfg.SingleConnection {
+		size = 1
+		if c.seg.mode == antiFreezeOn {
+			slog.Warn("cypher outbound: antiFreeze is off with singleConnection", "tag", c.tag)
+		}
+		c.seg.mode = antiFreezeOff // anti-freeze needs a new connection every few KB
+	}
+	c.pool = newPool(c.tag, size, rot, c.connect)
+	c.pool.single = cfg.SingleConnection
 	c.pool.onFreeze = c.onFreeze
 	if c.insecure {
 		slog.Warn("cypher outbound: certificate verification is disabled (insecure: true) — use only for testing", "tag", c.tag)
@@ -214,12 +236,7 @@ func newCypher(cfg config.OutboundConfig, resolve func(string) string) (*Cypher,
 
 func (c *Cypher) Tag() string { return c.tag }
 
-func (c *Cypher) helloID() utls.ClientHelloID {
-	if c.hello == (utls.ClientHelloID{}) {
-		return randomPool[mrand.IntN(len(randomPool))]
-	}
-	return c.hello
-}
+func (c *Cypher) helloID() utls.ClientHelloID { return c.hello }
 
 func (c *Cypher) Close() error {
 	c.pool.close()
@@ -240,7 +257,7 @@ func (c *Cypher) connectPlain(ctx context.Context) (*link, error) {
 	if err != nil {
 		return nil, err
 	}
-	ext := &protocol.Ext{Flags: protocol.FlagV2}
+	ext := &protocol.Ext{Flags: protocol.FlagV2 | protocol.FlagQuietIdle}
 	rc := protocol.NewRecordConn(uc, protocol.BuildAuthExt(c.key, time.Now(), ext))
 	l := &link{rc: rc}
 	rc.SetControlHandler(func(typ byte, body []byte) {
@@ -264,6 +281,13 @@ func (c *Cypher) connectPlain(ctx context.Context) (*link, error) {
 		return nil, err
 	}
 	l.sess = sess
+	// Servers without CapQuietIdle (older versions) drop a session after
+	// 60 s without data, so they get keepalives even while it is idle. A
+	// server sends keepalives while streams are open; nothing at all for
+	// deadServerTimeout means the connection is dead.
+	go protocol.KeepAlive(sess, rc.WriteKeepAlive,
+		func() bool { return l.caps.Load()&uint32(protocol.CapQuietIdle) == 0 },
+		rc.LastRead, deadServerTimeout, 0)
 	slog.Debug("connected to server", "outbound", c.tag, "server", c.server)
 	return l, nil
 }

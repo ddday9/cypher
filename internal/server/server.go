@@ -27,6 +27,13 @@ const (
 	authTimeout      = 30 * time.Second
 	requestTimeout   = 30 * time.Second
 	dialTimeout      = 10 * time.Second
+
+	// A client with open streams sends keepalives at most 40 s apart;
+	// nothing for deadClientTimeout means it is gone. An idle session (no
+	// streams) of a current client is silent; it is dropped after
+	// idleSessionTimeout (clients close idle tunnels after 1–3 min anyway).
+	deadClientTimeout  = 2 * time.Minute
+	idleSessionTimeout = 5 * time.Minute
 )
 
 // Server accepts cypher clients and serves a fallback website to everyone else.
@@ -124,7 +131,7 @@ func (directUpstream) DialTCP(ctx context.Context, addr netip.AddrPort) (net.Con
 }
 
 // serverCaps are the protocol v2 features this server offers.
-const serverCaps = protocol.CapPing | protocol.CapSegmented
+const serverCaps = protocol.CapPing | protocol.CapSegmented | protocol.CapQuietIdle
 
 func parseUsers(list []config.UserConfig) ([]protocol.User, error) {
 	var users []protocol.User
@@ -286,6 +293,11 @@ func (s *Server) handleConn(raw net.Conn) {
 		return
 	}
 	defer sess.Close()
+	// Clients older than FlagQuietIdle drop a session after 60 s without
+	// data, so they get keepalives even while idle.
+	quiet := res.Ext != nil && res.Ext.Flags&protocol.FlagQuietIdle != 0
+	go protocol.KeepAlive(sess, rc.WriteKeepAlive, func() bool { return !quiet }, rc.LastRead,
+		deadClientTimeout, idleSessionTimeout)
 	s.track(user.Key, sess)
 	defer s.untrack(user.Key, sess)
 	for {

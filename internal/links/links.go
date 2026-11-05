@@ -27,6 +27,7 @@ type Link struct {
 	Fingerprint string `json:"fingerprint,omitempty"`
 	Connections int    `json:"connections,omitempty"`
 	AntiFreeze  string `json:"antiFreeze,omitempty"` // auto, on, off
+	Single      bool   `json:"single,omitempty"`     // strictly one connection
 }
 
 // Format returns the share link.
@@ -44,6 +45,9 @@ func Format(l Link) string {
 	}
 	if l.AntiFreeze != "" {
 		q.Set("af", l.AntiFreeze)
+	}
+	if l.Single {
+		q.Set("sc", "1")
 	}
 	u.RawQuery = q.Encode()
 	return u.String()
@@ -82,6 +86,7 @@ func Parse(s string) (Link, error) {
 	case "auto", "on", "off":
 		l.AntiFreeze = af
 	}
+	l.Single = q.Get("sc") == "1"
 	l.Name = u.Fragment
 	if l.Name == "" {
 		host, _, _ := net.SplitHostPort(l.Server)

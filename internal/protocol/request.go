@@ -127,6 +127,10 @@ func ReadPacket(r io.Reader, buf []byte) (int, netx.Destination, error) {
 func MuxConfig() *smux.Config {
 	c := smux.DefaultConfig()
 	c.Version = 2
+	// smux's keepalive fires every N seconds exactly, a heartbeat a DPI can
+	// spot on a long-lived connection. KeepAlive (keepalive.go) sends the
+	// same frames at random intervals instead.
+	c.KeepAliveDisabled = true
 	c.KeepAliveInterval = 15 * time.Second
 	c.KeepAliveTimeout = 60 * time.Second
 	// Leave room for the 8-byte smux header inside one record.

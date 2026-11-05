@@ -101,9 +101,13 @@ type OutboundConfig struct {
 	CA          string `json:"ca,omitempty"`          // extra CA certificate (PEM) to trust
 	Insecure    bool   `json:"insecure,omitempty"`    // skip certificate verification (testing only)
 
-	// Connections is how many TLS connections to keep in parallel (default 2).
-	Connections int             `json:"connections,omitempty"`
-	Rotation    *RotationConfig `json:"rotation,omitempty"`
+	// Connections is how many TLS connections to keep in parallel (default 1).
+	Connections int `json:"connections,omitempty"`
+	// SingleConnection: strictly one TLS connection to the server at any
+	// time. Rotation happens only while the connection is unused (close,
+	// then reconnect on the next request), and anti-freeze mode is off.
+	SingleConnection bool            `json:"singleConnection,omitempty"`
+	Rotation         *RotationConfig `json:"rotation,omitempty"`
 	// AntiFreeze: "auto" (default) switches to short connections after a
 	// connection freeze is detected; "on" always uses them; "off" never.
 	// Needs a server of protocol version 2.

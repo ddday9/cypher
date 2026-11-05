@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -37,6 +38,7 @@ const (
 	smuxCmdSYN    = 0
 	smuxCmdFIN    = 1
 	smuxCmdPSH    = 2
+	smuxCmdNOP    = 3
 )
 
 var errBadRecord = errors.New("malformed record")
@@ -72,6 +74,8 @@ type RecordConn struct {
 
 	bytesIn, bytesOut atomic.Int64
 	lastRead          atomic.Int64 // unix nanos of the last record received
+	lastData          atomic.Int64 // ... of the last data record that was not a keepalive
+	lastWrite         atomic.Int64 // ... of the last data written (keepalives excluded)
 
 	onControl atomic.Pointer[ControlHandler]
 }
@@ -81,6 +85,23 @@ func (c *RecordConn) SetControlHandler(h ControlHandler) { c.onControl.Store(&h)
 
 // LastRead returns when the last record arrived from the peer.
 func (c *RecordConn) LastRead() time.Time { return time.Unix(0, c.lastRead.Load()) }
+
+// LastData returns when the last data record other than a smux keepalive
+// arrived from the peer.
+func (c *RecordConn) LastData() time.Time { return time.Unix(0, c.lastData.Load()) }
+
+// LastWrite returns when data other than a keepalive was last written.
+func (c *RecordConn) LastWrite() time.Time { return time.Unix(0, c.lastWrite.Load()) }
+
+// smuxNOP is a smux v2 keepalive frame (cmd NOP, no payload, stream 0).
+var smuxNOP = []byte{smuxVersion, smuxCmdNOP, 0, 0, 0, 0, 0, 0}
+
+// WriteKeepAlive sends a smux keepalive frame. Unlike smux's own keepalive
+// it is sent when the caller decides (at random intervals, see KeepAlive).
+func (c *RecordConn) WriteKeepAlive() error {
+	_, err := c.write(smuxNOP, false)
+	return err
+}
 
 // readRecord reads one record into c.rbuf and returns its data and whether
 // it is a control record.
@@ -102,7 +123,13 @@ func (c *RecordConn) readRecord() ([]byte, bool, error) {
 	if _, err := c.r.Discard(padLen); err != nil {
 		return nil, false, err
 	}
-	c.lastRead.Store(time.Now().UnixNano())
+	now := time.Now().UnixNano()
+	c.lastRead.Store(now)
+	// Each smux frame starts a new record (one frame per Write), so a
+	// keepalive is a record holding exactly a NOP frame.
+	if !control && !bytes.Equal(c.rbuf[:dataLen], smuxNOP) {
+		c.lastData.Store(now)
+	}
 	return c.rbuf[:dataLen], control, nil
 }
 
@@ -190,9 +217,14 @@ func (c *RecordConn) shaped(p []byte) bool {
 
 func randBetween(lo, hi int) int { return lo + rand.IntN(hi-lo+1) }
 
-func (c *RecordConn) Write(p []byte) (int, error) {
+func (c *RecordConn) Write(p []byte) (int, error) { return c.write(p, true) }
+
+func (c *RecordConn) write(p []byte, data bool) (int, error) {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
+	if data && len(p) > 0 {
+		c.lastWrite.Store(time.Now().UnixNano())
+	}
 	shaped := c.shaped(p)
 	total := 0
 	for len(p) > 0 || (total == 0 && c.prefix != nil) {

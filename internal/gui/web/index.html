@@ -119,6 +119,11 @@
             <option value="android">Android</option>
             <option value="random">Случайный</option>
           </select></label>
+        <label class="item"><span>Соединения<small>«Одно» — строго одно TLS-соединение к серверу, без ротации внахлёст и без защиты от заморозки</small></span>
+          <select id="connMode">
+            <option value="">Пул с ротацией</option>
+            <option value="single">Одно соединение</option>
+          </select></label>
         <label class="item"><span>Защита от заморозки<small>Короткие соединения, если оператор «замораживает» трафик</small></span>
           <select id="antiFreeze">
             <option value="">Авто</option>

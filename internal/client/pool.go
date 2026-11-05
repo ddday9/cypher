@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
@@ -113,10 +114,39 @@ func (t *tunnel) expired(now time.Time) bool {
 	return now.Sub(t.created) > t.maxAge || in+out > t.maxBytes
 }
 
+// Handshake pacing. In 2026 the TSPU was reported to freeze every TLS
+// connection to a server for ~120 s once more than 3 handshakes to one SNI
+// start close together (within ~400 ms; some reports say within 60 s), and
+// a client that keeps retrying only extends the freeze. So the pool:
+//   - never has more than one handshake in flight (concurrent requests wait
+//     for it instead of dialing their own);
+//   - starts handshakes at least handshakeGap apart and at most
+//     handshakeBurst per handshakeWindow;
+//   - after a failed dial waits retryMin, doubling up to retryMax, before
+//     the next attempt; requests in between fail at once.
+var (
+	handshakeGap    = time.Second
+	handshakeBurst  = 3
+	handshakeWindow = time.Minute
+	retryMin        = 2 * time.Second
+	retryMax        = 2 * time.Minute
+	// A request waits this long at most for the pacing above; beyond that
+	// it fails at once rather than hanging.
+	maxPacingWait = 5 * time.Second
+)
+
+// dialCall is the handshake in flight.
+type dialCall struct {
+	done chan struct{}
+	t    *tunnel
+	err  error
+}
+
 // pool keeps up to size live tunnels and rotates them.
 type pool struct {
 	tag    string
 	size   int
+	single bool // never more than one connection, not even while rotating
 	rot    rotation
 	dial   func(ctx context.Context) (*link, error)
 	nextID int
@@ -124,7 +154,11 @@ type pool struct {
 	mu       sync.Mutex
 	active   []*tunnel
 	draining []*tunnel
-	dialing  int
+	inflight *dialCall
+	starts   []time.Time // recent handshake starts
+	fails    int         // dials failed in a row
+	retryAt  time.Time
+	lastErr  error
 	closed   bool
 	stop     chan struct{}
 	started  bool
@@ -163,6 +197,15 @@ func (p *pool) tidy(now time.Time) {
 	for _, t := range p.active {
 		switch {
 		case t.sess.IsClosed():
+		case t.expired(now) && p.single:
+			// Break before make: rotate only once the tunnel is unused, so
+			// there is never a second connection.
+			if t.sess.NumStreams() == 0 {
+				slog.Debug("rotating tunnel", "outbound", p.tag, "id", t.id, "age", now.Sub(t.created).Round(time.Second))
+				t.sess.Close()
+				continue
+			}
+			kept = append(kept, t)
 		case t.expired(now):
 			slog.Debug("rotating tunnel", "outbound", p.tag, "id", t.id, "age", now.Sub(t.created).Round(time.Second))
 			p.draining = append(p.draining, t)
@@ -173,73 +216,138 @@ func (p *pool) tidy(now time.Time) {
 	p.active = kept
 }
 
-// get returns the least-loaded live tunnel, dialing one if there is none.
+// nextDial returns the earliest time a new handshake may start. Caller holds mu.
+func (p *pool) nextDial(now time.Time) time.Time {
+	kept := p.starts[:0]
+	for _, t := range p.starts {
+		if now.Sub(t) < handshakeWindow {
+			kept = append(kept, t)
+		}
+	}
+	p.starts = kept
+	at := p.retryAt
+	if n := len(p.starts); n > 0 {
+		if gap := p.starts[n-1].Add(handshakeGap); gap.After(at) {
+			at = gap
+		}
+		if n >= handshakeBurst {
+			if w := p.starts[n-handshakeBurst].Add(handshakeWindow); w.After(at) {
+				at = w
+			}
+		}
+	}
+	return at
+}
+
+// startDial begins a handshake in the background. Caller holds mu and has
+// checked that none is in flight.
+func (p *pool) startDial() *dialCall {
+	call := &dialCall{done: make(chan struct{})}
+	p.inflight = call
+	p.starts = append(p.starts, time.Now())
+	go func() {
+		// Not tied to the caller's context: a request that gives up must not
+		// waste a handshake that others are waiting for.
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		l, err := p.dial(ctx)
+		cancel()
+		p.mu.Lock()
+		p.inflight = nil
+		switch {
+		case err != nil:
+			p.fails++
+			wait := min(retryMin<<min(p.fails-1, 10), retryMax)
+			wait = wait*4/5 + rand.N(wait*2/5+1) // ±20%
+			p.retryAt = time.Now().Add(wait)
+			p.lastErr = err
+			call.err = err
+			slog.Warn("cannot connect to the server", "outbound", p.tag, "err", err, "retry_in", wait.Round(time.Second))
+		case p.closed:
+			l.sess.Close()
+			call.err = fmt.Errorf("outbound %s is closed", p.tag)
+		default:
+			p.fails, p.retryAt, p.lastErr = 0, time.Time{}, nil
+			call.t = p.newTunnel(l)
+			p.active = append(p.active, call.t)
+		}
+		p.mu.Unlock()
+		close(call.done)
+	}()
+	return call
+}
+
+// get returns the least-loaded live tunnel, connecting if there is none.
 // bad is a tunnel that just failed and must not be returned.
 func (p *pool) get(ctx context.Context, bad *tunnel) (*tunnel, error) {
 	p.mu.Lock()
-	if p.closed {
-		p.mu.Unlock()
-		return nil, fmt.Errorf("outbound %s is closed", p.tag)
-	}
-	if !p.started {
+	if !p.started && !p.closed {
 		p.started = true
 		go p.maintain()
 	}
 	if bad != nil {
 		bad.sess.Close()
 	}
-	p.tidy(time.Now())
-	var best *tunnel
-	for _, t := range p.active {
-		if best == nil || t.sess.NumStreams() < best.sess.NumStreams() {
-			best = t
+	for {
+		if p.closed {
+			p.mu.Unlock()
+			return nil, fmt.Errorf("outbound %s is closed", p.tag)
+		}
+		now := time.Now()
+		p.tidy(now)
+		var best *tunnel
+		for _, t := range p.active {
+			if best == nil || t.sess.NumStreams() < best.sess.NumStreams() {
+				best = t
+			}
+		}
+		if best != nil {
+			// Grow the pool in the background so new streams spread out.
+			if !p.single && len(p.active) < p.size && p.inflight == nil && !p.nextDial(now).After(now) {
+				p.startDial()
+			}
+			best.lastUsed = now
+			p.mu.Unlock()
+			return best, nil
+		}
+		call := p.inflight
+		if call == nil {
+			if at := p.nextDial(now); at.After(now) {
+				wait := at.Sub(now)
+				if wait > maxPacingWait {
+					err := p.lastErr
+					p.mu.Unlock()
+					if err == nil {
+						err = errors.New("too many new connections")
+					}
+					return nil, fmt.Errorf("server unreachable, next attempt in %s: %w", wait.Round(time.Second), err)
+				}
+				p.mu.Unlock()
+				select {
+				case <-time.After(wait):
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				p.mu.Lock()
+				continue
+			}
+			call = p.startDial()
+		}
+		p.mu.Unlock()
+		select {
+		case <-call.done:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		if call.err != nil {
+			return nil, call.err
+		}
+		p.mu.Lock()
+		if !call.t.sess.IsClosed() {
+			call.t.lastUsed = time.Now()
+			p.mu.Unlock()
+			return call.t, nil
 		}
 	}
-	// Grow the pool in the background so new streams spread out.
-	if best != nil && len(p.active)+p.dialing < p.size {
-		p.dialing++
-		go p.grow()
-	}
-	if best != nil {
-		best.lastUsed = time.Now()
-		p.mu.Unlock()
-		return best, nil
-	}
-	p.dialing++
-	p.mu.Unlock()
-
-	l, err := p.dial(ctx)
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.dialing--
-	if err != nil {
-		return nil, err
-	}
-	t := p.newTunnel(l)
-	if p.closed {
-		l.sess.Close()
-		return nil, fmt.Errorf("outbound %s is closed", p.tag)
-	}
-	p.active = append(p.active, t)
-	return t, nil
-}
-
-func (p *pool) grow() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	l, err := p.dial(ctx)
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.dialing--
-	if err != nil {
-		slog.Debug("background dial failed", "outbound", p.tag, "err", err)
-		return
-	}
-	if p.closed {
-		l.sess.Close()
-		return
-	}
-	p.active = append(p.active, p.newTunnel(l))
 }
 
 // maintain closes idle tunnels and drained tunnels with no streams left.
@@ -320,9 +428,13 @@ type link struct {
 
 // Freeze detection (protocol v2 servers): a censor that "freezes" a
 // connection silently drops its packets without resetting it, so streams
-// would hang until TCP gives up. When a tunnel with open streams has been
-// silent for freezeIdle, a PING is sent; no answer within freezeTimeout
-// means the tunnel is frozen and it is replaced at once.
+// would hang until TCP gives up. When a tunnel with open streams goes
+// silent for freezeIdle after data was flowing, or after we sent something
+// that got no answer, a PING is sent; no answer within freezeTimeout means
+// the tunnel is frozen and it is replaced.
+//
+// A tunnel that simply has nothing to say (an idle websocket) is probed
+// once, not every few seconds: a steady heartbeat is itself a DPI feature.
 var (
 	freezeIdle    = 3 * time.Second
 	freezeTimeout = 4 * time.Second
@@ -334,9 +446,11 @@ func (p *pool) watchdog(t *tunnel) {
 	defer tick.Stop()
 	var pingID uint32
 	var pingAt time.Time
+	var probedData, probedWrite time.Time // state already confirmed alive
 	if t.rc == nil {
 		return // anti-freeze sessions detect stalls themselves
 	}
+	probedData = t.rc.LastData() // nothing received yet: wait for data or an unanswered write
 	for range tick.C {
 		if t.sess.IsClosed() {
 			return
@@ -345,9 +459,8 @@ func (p *pool) watchdog(t *tunnel) {
 			continue
 		}
 		now := time.Now()
-		last := t.rc.LastRead()
 		if !pingAt.IsZero() {
-			if t.link.pong.Load() == pingID || last.After(pingAt) {
+			if t.link.pong.Load() == pingID || t.rc.LastRead().After(pingAt) {
 				pingAt = time.Time{} // alive
 			} else if now.Sub(pingAt) > freezeTimeout {
 				slog.Warn("tunnel frozen (no answer from the server), reconnecting", "outbound", p.tag, "id", t.id)
@@ -360,7 +473,13 @@ func (p *pool) watchdog(t *tunnel) {
 			}
 			continue
 		}
-		if t.sess.NumStreams() > 0 && now.Sub(last) > freezeIdle {
+		last, wrote := t.rc.LastData(), t.rc.LastWrite()
+		if t.sess.NumStreams() == 0 || now.Sub(last) <= freezeIdle {
+			continue
+		}
+		unanswered := wrote.After(last) && !wrote.Equal(probedWrite) && now.Sub(wrote) > freezeIdle
+		if !last.Equal(probedData) || unanswered {
+			probedData, probedWrite = last, wrote
 			pingID++
 			pingAt = now
 			var b [4]byte

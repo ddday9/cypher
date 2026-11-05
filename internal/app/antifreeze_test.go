@@ -144,8 +144,15 @@ func TestAntiFreeze(t *testing.T) {
 	if frozen.Load() != before {
 		t.Fatalf("anti-freeze connections reached the freeze threshold")
 	}
-	// Auto: the first download freezes, is detected, and the next one works.
+	// Auto: the first freeze alone does not switch (it could be a throttle
+	// on the whole server, which more connections make worse); after the
+	// second one, which shows that reconnecting works, the next download
+	// goes over short connections.
 	o := outbound("auto")
+	download(o, dest, payload, 15*time.Second)
+	if o.(*client.Cypher).AntiFreezeActive() {
+		t.Fatal("auto mode switched after a single freeze")
+	}
 	download(o, dest, payload, 15*time.Second)
 	if err := download(o, dest, payload, 20*time.Second); err != nil {
 		t.Fatalf("anti-freeze auto after a freeze: %v", err)

@@ -28,6 +28,9 @@ const (
 // tunnels again.
 var antiFreezeHold = 30 * time.Minute
 
+// freezeRepeatWindow: two freezes this close together start anti-freeze mode.
+var freezeRepeatWindow = 10 * time.Minute
+
 // Carrier dial limits. Some ISPs block a server for 60–120 s after about a
 // dozen TLS connections to it in a short time (reports from Nov 2025 on).
 // Anti-freeze opens a connection per budget, so it must stay below that:
@@ -93,6 +96,8 @@ type segState struct {
 	rate      int          // carrier dials per carrierWindow
 	supported atomic.Int32 // 0 unknown, 1 yes (HELLO said so), -1 no (v1 server)
 	until     atomic.Int64 // auto mode: segmented until this unix nano
+
+	lastFreeze atomic.Int64 // unix nano of the last frozen plain tunnel
 }
 
 func (st *segState) wantSegmented() bool {
@@ -106,9 +111,23 @@ func (st *segState) wantSegmented() bool {
 }
 
 // onFreeze is called by the pool when a plain tunnel froze.
+//
+// Auto mode switches only on the second freeze within freezeRepeatWindow.
+// A tunnel can freeze for two different reasons: the per-connection volume
+// limit (~16 KB to foreign hosting; a fresh connection works again at once,
+// and short connections are the cure) or a throttle on the whole server
+// (new handshakes hang too, typically for ~120 s; more connections only
+// make it worse). A second freeze means a reconnect worked in between, so
+// it is the first kind.
 func (c *Cypher) onFreeze() {
 	st := &c.seg
 	if st.mode != antiFreezeAuto || st.supported.Load() != 1 {
+		return
+	}
+	now := time.Now().UnixNano()
+	prev := st.lastFreeze.Swap(now)
+	if now-prev > int64(freezeRepeatWindow) {
+		slog.Info("connection froze; anti-freeze mode starts if it happens again", "outbound", c.tag)
 		return
 	}
 	if time.Now().UnixNano() >= st.until.Load() {
@@ -217,6 +236,7 @@ func (c *Cypher) connectSegmented(ctx context.Context) (*link, error) {
 		sess.Close()
 		return nil, err
 	}
+	go protocol.KeepAlive(ms, sess.WriteKeepAlive, func() bool { return true }, nil, 0, 0)
 	slog.Info("connected in anti-freeze mode", "outbound", c.tag, "budget", protocol.DefaultBudget)
 	return &link{sess: ms, seg: sess}, nil
 }

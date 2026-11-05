@@ -55,6 +55,7 @@ type Settings struct {
 	Fingerprint    string    `json:"fingerprint,omitempty"`    // overrides profiles when set
 	AntiFreeze     string    `json:"antiFreeze,omitempty"`     // auto (default), on, off; overrides profiles
 	AntiFreezeRate int       `json:"antiFreezeRate,omitempty"` // new connections per 10 s in anti-freeze mode
+	Single         bool      `json:"single,omitempty"`         // strictly one connection; overrides profiles
 	LogLevel       string    `json:"logLevel"`
 }
 

@@ -28,6 +28,10 @@ const (
 	FlagSegmented uint16 = 1 << 1
 	// FlagAttach: the connection joins the existing session Ext.Session.
 	FlagAttach uint16 = 1 << 2
+	// FlagQuietIdle: the client does not time out a session that is silent
+	// while it has no streams, so the server need not send keepalives then
+	// (older clients close a session after 60 s without data).
+	FlagQuietIdle uint16 = 1 << 3
 )
 
 // Server capabilities announced in HELLO.
@@ -37,6 +41,8 @@ const (
 	// CapRelay is reserved for chaining servers (a server forwarding to the
 	// next one); no server announces it yet.
 	CapRelay uint16 = 1 << 2
+	// CapQuietIdle: like FlagQuietIdle, from the server's side.
+	CapQuietIdle uint16 = 1 << 3
 )
 
 // Ext is the client's protocol extension.

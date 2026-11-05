@@ -76,6 +76,8 @@ func (s *Server) handleSegmented(rc *protocol.RecordConn, user *protocol.User, e
 		return
 	}
 	defer ms.Close()
+	// The session itself notices a lost client (no carrier for sessionIdle).
+	go protocol.KeepAlive(ms, sess.WriteKeepAlive, func() bool { return true }, nil, 0, 0)
 	s.track(user.Key, ms)
 	defer s.untrack(user.Key, ms)
 	for {
