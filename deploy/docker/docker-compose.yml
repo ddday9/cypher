@@ -1,11 +1,13 @@
-# cypher server in Docker.
+# cypher server in Docker, with nginx in front.
 #
-#   1. Point your domain (A record) at this server; open TCP port 443.
+#   1. Point your domain (A record) at this server; open TCP ports 80 and 443.
 #   2. echo "CYPHER_DOMAIN=example.com" > .env   (optionally CYPHER_EMAIL=you@example.com)
 #   3. docker compose up -d && docker compose logs cypher   ← the client link is printed here
 #
-# The certificate is obtained from Let's Encrypt automatically on port 443
-# (TLS-ALPN-01), so nothing else (nginx, certbot, port 80) is needed.
+# cypher gets the Let's Encrypt certificate itself (no certbot) and renews it
+# automatically 30 days before expiry, without a restart.
+# Port 80: nginx (redirect to https, Let's Encrypt checks).
+# Port 443: cypher; everyone without a key sees the site from ./site via nginx.
 name: cypher
 
 services:
@@ -21,18 +23,35 @@ services:
     environment:
       CYPHER_DOMAIN: ${CYPHER_DOMAIN:?set CYPHER_DOMAIN in .env}
       CYPHER_EMAIL: ${CYPHER_EMAIL:-}
+      CYPHER_ACME_HTTP: ":8081"
+      CYPHER_FALLBACK_PROXY: "http://nginx:8080"
     volumes:
-      # Config with user keys and the certificate cache.
+      # Config, user keys and the certificate.
       - cypher-data:/etc/cypher
-      # The website shown to everyone without a key. Put an index.html here.
-      - ./site:/var/www/cypher:ro
     read_only: true
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    logging:
+    logging: &logging
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
+
+  nginx:
+    image: nginx:stable-alpine
+    container_name: cypher-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80/tcp"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # The cover website. Replace index.html with your own site.
+      - ./site:/usr/share/nginx/html:ro
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    logging: *logging
 
 volumes:
   cypher-data:

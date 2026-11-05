@@ -37,7 +37,7 @@
 ## Быстрый старт
 
 Готовые сборки — в [Releases](https://github.com/ddday9/cypher/releases):
-клиент для Windows `cypher-gui-…-windows-amd64.exe` и образ сервера
+клиент для Windows `cypher-gui-windows-amd64.exe` и образ сервера
 `ghcr.io/ddday9/cypher`.
 
 Сервер на Linux в Docker ([подробно](docs/docker.md)):

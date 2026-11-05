@@ -111,8 +111,9 @@ type User struct {
 
 // Authenticator verifies client auth headers and rejects replays.
 type Authenticator struct {
-	users []User
-	now   func() time.Time
+	usersMu sync.RWMutex
+	users   []User
+	now     func() time.Time
 
 	mu        sync.Mutex
 	seen      map[[nonceSize]byte]int64
@@ -125,15 +126,37 @@ func NewAuthenticator(users []User) *Authenticator {
 }
 
 // verify checks a complete header and returns the user and padding length.
+// HasKey reports whether a user with key k is currently allowed.
+func (a *Authenticator) HasKey(k Key) bool {
+	a.usersMu.RLock()
+	defer a.usersMu.RUnlock()
+	for _, u := range a.users {
+		if u.Key == k {
+			return true
+		}
+	}
+	return false
+}
+
+// SetUsers replaces the user list; new connections use it immediately.
+func (a *Authenticator) SetUsers(users []User) {
+	a.usersMu.Lock()
+	a.users = users
+	a.usersMu.Unlock()
+}
+
 func (a *Authenticator) verify(hdr []byte) (*User, int, bool) {
 	var user *User
+	a.usersMu.RLock()
 	for i := range a.users {
 		mac := computeMAC(a.users[i].Key, hdr)
 		if hmac.Equal(mac, hdr[nonceSize+timestampSize+padLenSize:AuthHeaderSize]) {
-			user = &a.users[i]
+			u := a.users[i]
+			user = &u
 			break
 		}
 	}
+	a.usersMu.RUnlock()
 	if user == nil {
 		return nil, 0, false
 	}

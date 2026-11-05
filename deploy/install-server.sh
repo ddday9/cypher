@@ -5,7 +5,8 @@
 #   sudo ./install-server.sh --self-signed            # testing, no domain
 #
 # Options:
-#   --domain NAME     domain pointing at this server (gets a Let's Encrypt cert)
+#   --domain NAME     domain pointing at this server; cypher gets and renews the
+#                     Let's Encrypt certificate itself (ports 80 and 443 open)
 #   --email ADDR      email for Let's Encrypt (optional)
 #   --self-signed     use a self-signed certificate (testing only)
 #   --binary PATH     cypher binary to install (default: ./cypher-linux-<arch>
@@ -13,9 +14,13 @@
 #   --port N          listen port (default 443)
 #   --site DIR        static website shown to non-clients (default: a placeholder)
 #   --add-user NAME   add a user (with a new key) to an existing config
+#   --no-nginx        do not install nginx; cypher serves port 80 itself
+#
+# Users later: cypher user add|list|revoke NAME -c /etc/cypher/server.json
+# (applied by the running server within seconds, no restart).
 set -euo pipefail
 
-DOMAIN="" EMAIL="" SELF_SIGNED=0 BINARY="" PORT=443 SITE_SRC="" ADD_USER=""
+DOMAIN="" EMAIL="" SELF_SIGNED=0 BINARY="" PORT=443 SITE_SRC="" ADD_USER="" NO_NGINX=0
 ETC=/etc/cypher
 WWW=/var/www/cypher
 UNIT=/etc/systemd/system/cypher.service
@@ -33,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --port) PORT="$2"; shift 2 ;;
     --site) SITE_SRC="$2"; shift 2 ;;
     --add-user) ADD_USER="$2"; shift 2 ;;
+    --no-nginx) NO_NGINX=1; shift ;;
     -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
@@ -62,23 +68,7 @@ fi
 # --- add a user to an existing install --------------------------------------
 if [[ -n "$ADD_USER" ]]; then
   [[ -f $ETC/server.json ]] || die "$ETC/server.json not found; install first"
-  command -v python3 >/dev/null || die "python3 is required for --add-user"
-  KEY="$(/usr/local/bin/cypher genkey)"
-  python3 - "$ETC/server.json" "$ADD_USER" "$KEY" <<'PY'
-import json, sys
-path, name, key = sys.argv[1:]
-cfg = json.load(open(path))
-users = cfg["server"].setdefault("users", [])
-if any(u.get("name") == name for u in users):
-    sys.exit(f"user {name} already exists")
-users.append({"name": name, "key": key})
-json.dump(cfg, open(path, "w"), indent=2)
-PY
-  systemctl restart cypher
-  log "user $ADD_USER added; key: $KEY"
-  HOST_PORT=$(python3 -c "import json;c=json.load(open('$ETC/server.json'));print(c['server'].get('listen',':443'))")
-  echo "Edit the host below if needed:"
-  /usr/local/bin/cypher link -server "$(hostname -f):${HOST_PORT##*:}" -key "$KEY" -name "$ADD_USER" 2>/dev/null || true
+  /usr/local/bin/cypher user add "$ADD_USER" -c $ETC/server.json
   exit 0
 fi
 
@@ -108,63 +98,91 @@ elif [[ ! -e $WWW/index.html ]]; then
 HTML
 fi
 
-# --- certificate -------------------------------------------------------------
-if [[ $SELF_SIGNED -eq 1 ]]; then
-  if [[ ! -f $ETC/cert.pem ]]; then
-    NAME="${DOMAIN:-$(hostname -I | awk '{print $1}')}"
-    if [[ "$NAME" =~ ^[0-9.]+$ || "$NAME" == *:* ]]; then SAN="IP:$NAME"; else SAN="DNS:$NAME"; fi
-    log "creating a self-signed certificate for $NAME"
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 825 \
-      -keyout $ETC/key.pem -out $ETC/cert.pem -subj "/CN=$NAME" -addext "subjectAltName=$SAN" 2>/dev/null
+# --- nginx: port 80 and the cover website -------------------------------------
+# cypher on :443 passes everyone without a key to nginx on 127.0.0.1:8080, and
+# nginx on :80 redirects to https and forwards Let's Encrypt checks to cypher.
+USE_NGINX=0
+if [[ $SELF_SIGNED -eq 0 && $NO_NGINX -eq 0 ]]; then
+  if ! command -v nginx >/dev/null; then
+    log "installing nginx"
+    if command -v apt-get >/dev/null; then apt-get update -qq && apt-get install -y -qq nginx
+    elif command -v dnf >/dev/null; then dnf install -y -q nginx
+    fi
   fi
-else
-  if ! command -v certbot >/dev/null; then
-    log "installing certbot"
-    if command -v apt-get >/dev/null; then apt-get update -qq && apt-get install -y -qq certbot
-    elif command -v dnf >/dev/null; then dnf install -y -q certbot
-    else die "install certbot manually"; fi
-  fi
-  # Copy renewed certificates where the cypher user can read them. The server
-  # notices the new files by itself; no restart is needed.
-  install -d /etc/letsencrypt/renewal-hooks/deploy
-  cat > /etc/letsencrypt/renewal-hooks/deploy/cypher.sh <<EOF
-#!/bin/sh
-[ "\$RENEWED_LINEAGE" = "/etc/letsencrypt/live/$DOMAIN" ] || exit 0
-install -m 640 -o root -g cypher "\$RENEWED_LINEAGE/fullchain.pem" $ETC/cert.pem
-install -m 640 -o root -g cypher "\$RENEWED_LINEAGE/privkey.pem" $ETC/key.pem
-EOF
-  chmod 755 /etc/letsencrypt/renewal-hooks/deploy/cypher.sh
-  if [[ ! -d /etc/letsencrypt/live/$DOMAIN ]]; then
-    systemctl stop cypher 2>/dev/null || true
-    log "requesting a certificate for $DOMAIN (port 80 must be reachable)"
+  if command -v nginx >/dev/null; then
+    USE_NGINX=1
+    rm -f /etc/nginx/sites-enabled/default   # it would take port 80
+    cat > /etc/nginx/conf.d/cypher.conf <<'NGINXCONF'
+server {
+    listen 80 default_server;
+    server_name _;
+    server_tokens off;
+    location /.well-known/acme-challenge/ {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+    }
+    location / { return 301 https://$host$request_uri; }
+}
+server {
+    listen 127.0.0.1:8080;
+    server_name _;
+    server_tokens off;
+    root /var/www/cypher;
+    index index.html;
+    set_real_ip_from 127.0.0.1;
+    real_ip_header X-Forwarded-For;
+    location / { try_files $uri $uri/ =404; }
+}
+NGINXCONF
+    nginx -t && systemctl enable --now nginx >/dev/null && systemctl reload nginx
     if command -v ufw >/dev/null && ufw status | grep -q active; then ufw allow 80/tcp >/dev/null; fi
-    certbot certonly --standalone --non-interactive --agree-tos \
-      ${EMAIL:+--email "$EMAIL"} ${EMAIL:---register-unsafely-without-email} -d "$DOMAIN"
+  else
+    log "nginx is not available; cypher serves port 80 and the website itself"
   fi
-  RENEWED_LINEAGE=/etc/letsencrypt/live/$DOMAIN /etc/letsencrypt/renewal-hooks/deploy/cypher.sh
 fi
-chown root:cypher $ETC/cert.pem $ETC/key.pem
-chmod 640 $ETC/cert.pem $ETC/key.pem
+
+# --- certificate -------------------------------------------------------------
+# With a domain, cypher gets the Let's Encrypt certificate itself and renews it
+# automatically (no certbot, no restart). --self-signed is for testing.
+if [[ $SELF_SIGNED -eq 1 && ! -f $ETC/cert.pem ]]; then
+  NAME="${DOMAIN:-$(hostname -I | awk '{print $1}')}"
+  if [[ "$NAME" =~ ^[0-9.]+$ || "$NAME" == *:* ]]; then SAN="IP:$NAME"; else SAN="DNS:$NAME"; fi
+  log "creating a self-signed certificate for $NAME"
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 825 \
+    -keyout $ETC/key.pem -out $ETC/cert.pem -subj "/CN=$NAME" -addext "subjectAltName=$SAN" 2>/dev/null
+  chown root:cypher $ETC/cert.pem $ETC/key.pem
+  chmod 640 $ETC/cert.pem $ETC/key.pem
+fi
+install -d -m 770 -o root -g cypher $ETC/acme
 
 # --- config --------------------------------------------------------------------
 NEW_KEY=""
 if [[ ! -f $ETC/server.json ]]; then
   NEW_KEY="$(/usr/local/bin/cypher genkey)"
-  cat > $ETC/server.json <<EOF
+  if [[ $SELF_SIGNED -eq 1 ]]; then
+    TLS='"certFile": "'$ETC'/cert.pem", "keyFile": "'$ETC'/key.pem",'
+    FALLBACK='{ "dir": "'$WWW'" }'
+  elif [[ $USE_NGINX -eq 1 ]]; then
+    TLS='"acme": { "domain": "'$DOMAIN'", "email": "'$EMAIL'", "cacheDir": "'$ETC'/acme", "httpListen": "127.0.0.1:8081" },'
+    FALLBACK='{ "proxy": "http://127.0.0.1:8080" }'
+  else
+    TLS='"acme": { "domain": "'$DOMAIN'", "email": "'$EMAIL'", "cacheDir": "'$ETC'/acme", "httpListen": ":80" },'
+    FALLBACK='{ "dir": "'$WWW'" }'
+  fi
+  cat > $ETC/server.json <<SERVERJSON
 {
   "log": { "level": "info" },
   "server": {
     "listen": ":$PORT",
-    "certFile": "$ETC/cert.pem",
-    "keyFile": "$ETC/key.pem",
+    $TLS
     "users": [ { "name": "user1", "key": "$NEW_KEY" } ],
-    "fallback": { "dir": "$WWW" },
+    "fallback": $FALLBACK,
     "allowPrivate": false
   }
 }
-EOF
+SERVERJSON
   chown root:cypher $ETC/server.json
-  chmod 640 $ETC/server.json
+  chmod 660 $ETC/server.json
 else
   log "keeping existing $ETC/server.json"
 fi
@@ -203,7 +221,9 @@ EOF
   if [[ $SELF_SIGNED -eq 0 ]]; then
     echo
     echo "Link for the desktop client (cypher-gui → Servers → paste):"
-    /usr/local/bin/cypher link -server "$HOST:$PORT" -key "$NEW_KEY" -name "$HOST"
+    /usr/local/bin/cypher user link user1 -c $ETC/server.json
+    echo
+    echo "The certificate is requested now; watch for 'certificate ready': journalctl -u cypher -f"
   fi
 fi
 echo

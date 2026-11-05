@@ -47,7 +47,8 @@ jobs:
           mkdir -p dist
           for target in linux/amd64 linux/arm64 windows/amd64; do
             os=${target%/*}; arch=${target#*/}
-            name="cypher-$VERSION-$os-$arch"
+            # Unversioned names keep releases/latest/download/<name> links stable.
+            name="cypher-$os-$arch"
             out="build/$name"
             mkdir -p "$out"
             ext=""; [ "$os" = windows ] && ext=".exe"
@@ -72,7 +73,7 @@ jobs:
             --product-name cypher --file-description "cypher VPN client" \
             --original-filename cypher-gui.exe --file-version "${VERSION#v}" --product-version "${VERSION#v}")
           make gui VERSION="$VERSION"
-          cp bin/cypher-gui.exe "dist/cypher-gui-$VERSION-windows-amd64.exe"
+          cp bin/cypher-gui.exe "dist/cypher-gui-windows-amd64.exe"
 
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
@@ -85,7 +86,7 @@ jobs:
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           cat > notes.md <<NOTES
           ## Клиент для Windows
-          \`cypher-gui-$VERSION-windows-amd64.exe\` — графический клиент (Wintun встроен). Положите в отдельную папку и запустите.
+          \`cypher-gui-windows-amd64.exe\` — графический клиент (Wintun встроен). Положите в отдельную папку и запустите.
 
           ## Сервер в Docker
           \`\`\`
@@ -94,8 +95,8 @@ jobs:
           Инструкция: [docs/docker.md](https://github.com/$GITHUB_REPOSITORY/blob/$VERSION/docs/docker.md).
 
           ## Остальное
-          * \`cypher-$VERSION-linux-*.tar.gz\` — бинарник, скрипты \`deploy/\` (в том числе docker-compose), примеры конфигов.
-          * \`cypher-$VERSION-windows-amd64.zip\` — консольный клиент.
+          * \`cypher-linux-*.tar.gz\` — бинарник, скрипты \`deploy/\` (docker-compose с nginx, systemd), примеры конфигов.
+          * \`cypher-windows-amd64.zip\` — консольный клиент.
           * \`SHA256SUMS\` — контрольные суммы.
           NOTES
           if gh release view "$VERSION" >/dev/null 2>&1; then

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	mrand "math/rand/v2"
 	"net"
 	"net/netip"
 	"os"
@@ -78,7 +79,15 @@ var fingerprints = map[string]utls.ClientHelloID{
 	"safari":  utls.HelloSafari_Auto,
 	"edge":    utls.HelloEdge_Auto,
 	"ios":     utls.HelloIOS_Auto,
-	"random":  utls.HelloRandomized,
+	// "random" picks one of the real browser profiles above for every new
+	// connection (uTLS's fully randomized hello does not look like any
+	// browser and sometimes fails the handshake).
+	"random": {},
+}
+
+var randomPool = []utls.ClientHelloID{
+	utls.HelloFirefox_Auto, utls.HelloChrome_Auto, utls.HelloSafari_Auto,
+	utls.HelloEdge_Auto, utls.HelloIOS_Auto,
 }
 
 // Cypher tunnels connections to a cypher server, multiplexing streams over
@@ -192,6 +201,13 @@ func newCypher(cfg config.OutboundConfig, resolve func(string) string) (*Cypher,
 
 func (c *Cypher) Tag() string { return c.tag }
 
+func (c *Cypher) helloID() utls.ClientHelloID {
+	if c.hello == (utls.ClientHelloID{}) {
+		return randomPool[mrand.IntN(len(randomPool))]
+	}
+	return c.hello
+}
+
 func (c *Cypher) Close() error {
 	c.pool.close()
 	return nil
@@ -210,7 +226,7 @@ func (c *Cypher) connect(ctx context.Context) (*smux.Session, *protocol.RecordCo
 		ServerName:         c.serverName,
 		RootCAs:            c.roots,
 		InsecureSkipVerify: c.insecure,
-	}, c.hello)
+	}, c.helloID())
 	hctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	if err := uc.HandshakeContext(hctx); err != nil {

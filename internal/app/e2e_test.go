@@ -406,3 +406,54 @@ func TestFallbackSite(t *testing.T) {
 		t.Fatalf("directory listing exposed: %d", code)
 	}
 }
+
+// TestRevokeUser checks that SetUsers disconnects a revoked user at once and
+// lets a newly added one in.
+func TestRevokeUser(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile, _ := writeCert(t, dir)
+	alice, bob := protocol.GenerateKey(), protocol.GenerateKey()
+	s, err := server.New(&config.ServerConfig{
+		CertFile: certFile, KeyFile: keyFile, AllowPrivate: true,
+		Users: []config.UserConfig{{Name: "alice", Key: alice.String()}},
+	}, func(p string) string { return p })
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Serve(ctx, ln)
+	e := env{serverAddr: ln.Addr().String(), caFile: certFile}
+	dest, _ := netx.ParseDestination("tcp", echoServer(t))
+
+	oa := e.outbound(t, alice)
+	c, err := oa.Dial(context.Background(), dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	echoRoundTrip(t, c, "before")
+
+	// Bob is not a user yet.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel2()
+	if _, err := e.outbound(t, bob).Dial(ctx2, dest); err == nil {
+		t.Fatal("unknown user connected")
+	}
+	// Replace alice by bob.
+	if err := s.SetUsers([]config.UserConfig{{Name: "bob", Key: bob.String()}}); err != nil {
+		t.Fatal(err)
+	}
+	c.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := c.Read(make([]byte, 1)); err == nil {
+		t.Fatal("revoked user's stream still open")
+	}
+	cb, err := e.outbound(t, bob).Dial(context.Background(), dest)
+	if err != nil {
+		t.Fatalf("added user rejected: %v", err)
+	}
+	echoRoundTrip(t, cb, "bob")
+	if err := s.SetUsers(nil); err == nil {
+		t.Fatal("empty user list accepted")
+	}
+}

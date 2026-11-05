@@ -51,6 +51,10 @@ type ACMEConfig struct {
 	// CA is an extra root (PEM) to trust when talking to it.
 	DirectoryURL string `json:"directoryURL,omitempty"`
 	CA           string `json:"ca,omitempty"`
+	// HTTPListen serves the HTTP-01 challenge (and redirects everything else
+	// to https). Use ":80" when nothing else runs on port 80, or an internal
+	// port that nginx on port 80 forwards /.well-known/acme-challenge/ to.
+	HTTPListen string `json:"httpListen,omitempty"`
 }
 
 type UserConfig struct {

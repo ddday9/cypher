@@ -140,3 +140,43 @@ func (c *Client) watch(ctx context.Context, interval time.Duration) {
 		applied, pending = snapshot(c.watchedFiles()), nil
 	}
 }
+
+// watchServerConfig applies user changes from the server config file
+// without a restart: added users can connect, revoked users are
+// disconnected. Other settings still need a restart.
+func watchServerConfig(ctx context.Context, path string, s interface {
+	SetUsers([]config.UserConfig) error
+}, interval time.Duration) {
+	files := []string{path}
+	applied := snapshot(files)
+	var pending map[string]fileState
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		cur := snapshot(files)
+		if equal(cur, applied) {
+			pending = nil
+			continue
+		}
+		if pending == nil || !equal(cur, pending) {
+			pending = cur
+			continue
+		}
+		applied, pending = cur, nil
+		cfg, err := config.Load(path)
+		if err != nil || cfg.Server == nil {
+			slog.Error("server config reload failed, keeping the current users", "err", err)
+			continue
+		}
+		if err := s.SetUsers(cfg.Server.Users); err != nil {
+			slog.Error("server config reload failed, keeping the current users", "err", err)
+			continue
+		}
+		slog.Info("users reloaded", "users", len(cfg.Server.Users))
+	}
+}

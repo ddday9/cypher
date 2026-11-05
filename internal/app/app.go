@@ -31,6 +31,9 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		if err != nil {
 			return err
 		}
+		if cfg.Path != "" {
+			go watchServerConfig(ctx, cfg.Path, s, reloadInterval)
+		}
 		return s.ListenAndServe(ctx)
 	}
 	c, err := NewClient(cfg)

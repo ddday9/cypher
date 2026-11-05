@@ -72,11 +72,17 @@ func initServerConfig(path string) error {
 		ACME: &config.ACMEConfig{
 			Domain: domain, Email: os.Getenv("CYPHER_EMAIL"), CacheDir: "acme",
 			DirectoryURL: os.Getenv("CYPHER_ACME_DIRECTORY"), CA: os.Getenv("CYPHER_ACME_CA"),
+			HTTPListen: os.Getenv("CYPHER_ACME_HTTP"),
 		},
 		Users: []config.UserConfig{{Name: envOr("CYPHER_USER", "user1"), Key: key}},
 	}
-	// The site folder is checked on every request, so it may be filled later.
-	srv.Fallback.Dir = envOr("CYPHER_SITE", "/var/www/cypher")
+	if p := os.Getenv("CYPHER_FALLBACK_PROXY"); p != "" {
+		// Everyone without a key is passed to this web server (nginx).
+		srv.Fallback.Proxy = p
+	} else {
+		// The site folder is checked on every request, so it may be filled later.
+		srv.Fallback.Dir = envOr("CYPHER_SITE", "/var/www/cypher")
+	}
 	cfg := config.Config{Server: srv}
 	cfg.Log.Level = envOr("CYPHER_LOG", "info")
 	if err := writeConfig(path, &cfg); err != nil {
@@ -100,6 +106,12 @@ func writeConfig(path string, cfg *config.Config) error {
 	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
+	// Keep the mode and owner of the existing file, so that a service running
+	// as another user can still read a config edited by root.
+	if st, err := os.Stat(path); err == nil {
+		os.Chmod(tmp, st.Mode().Perm())
+		keepOwner(tmp, st)
+	}
 	return os.Rename(tmp, path)
 }
 
@@ -122,50 +134,94 @@ func userLink(cfg *config.Config, u config.UserConfig, host string) string {
 	return links.Format(links.Link{Name: host + " · " + u.Name, Server: net.JoinHostPort(host, port), Key: u.Key})
 }
 
-func addUser(args []string) int {
-	fs := flag.NewFlagSet("adduser", flag.ExitOnError)
-	path := fs.String("c", envOr("CYPHER_CONFIG", defaultServerConfig), "server config file")
-	name := fs.String("name", "", "user name")
-	host := fs.String("host", "", "server address for the link (default: the ACME domain)")
-	fs.Parse(args)
-	if *name == "" {
-		fmt.Fprintln(os.Stderr, "usage: cypher adduser -c FILE -name NAME")
+// userCmd manages server users. Changes are picked up by a running server
+// within a few seconds; revoked users are disconnected immediately.
+func userCmd(args []string) int {
+	usage := func() int {
+		fmt.Fprint(os.Stderr, `usage:
+  cypher user add NAME      create a user and print its link
+  cypher user list          list users with their links
+  cypher user link NAME     print the link of a user
+  cypher user revoke NAME   delete a user (disconnects it at once)
+options (after the command): -c FILE (default $CYPHER_CONFIG or /etc/cypher/server.json), -host HOST
+`)
 		return 2
 	}
+	if len(args) == 0 {
+		return usage()
+	}
+	sub := args[0]
+	fs := flag.NewFlagSet("user "+sub, flag.ExitOnError)
+	path := fs.String("c", envOr("CYPHER_CONFIG", defaultServerConfig), "server config file")
+	host := fs.String("host", "", "server address for links (default: the ACME domain)")
+	name := ""
+	rest := args[1:]
+	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+		name, rest = rest[0], rest[1:]
+	}
+	fs.Parse(rest)
+	if name == "" && fs.NArg() > 0 {
+		name = fs.Arg(0)
+	}
 	cfg, err := config.Load(*path)
 	if err != nil || cfg.Server == nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		return 1
 	}
-	for _, u := range cfg.Server.Users {
-		if u.Name == *name {
-			fmt.Fprintf(os.Stderr, "user %q already exists\n", *name)
+	find := func() int {
+		for i, u := range cfg.Server.Users {
+			if u.Name == name {
+				return i
+			}
+		}
+		return -1
+	}
+	switch sub {
+	case "add":
+		if name == "" {
+			return usage()
+		}
+		if find() >= 0 {
+			fmt.Fprintf(os.Stderr, "user %q already exists\n", name)
 			return 1
 		}
-	}
-	u := config.UserConfig{Name: *name, Key: protocol.GenerateKey().String()}
-	cfg.Server.Users = append(cfg.Server.Users, u)
-	if err := writeConfig(*path, cfg); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	fmt.Println(userLink(cfg, u, *host))
-	fmt.Fprintln(os.Stderr, "restart the server to apply (docker compose restart)")
-	return 0
-}
-
-func printLinks(args []string) int {
-	fs := flag.NewFlagSet("links", flag.ExitOnError)
-	path := fs.String("c", envOr("CYPHER_CONFIG", defaultServerConfig), "server config file")
-	host := fs.String("host", "", "server address for the links (default: the ACME domain)")
-	fs.Parse(args)
-	cfg, err := config.Load(*path)
-	if err != nil || cfg.Server == nil {
-		fmt.Fprintln(os.Stderr, "config:", err)
-		return 1
-	}
-	for _, u := range cfg.Server.Users {
-		fmt.Printf("%s\t%s\n", u.Name, userLink(cfg, u, *host))
+		u := config.UserConfig{Name: name, Key: protocol.GenerateKey().String()}
+		cfg.Server.Users = append(cfg.Server.Users, u)
+		if err := writeConfig(*path, cfg); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Println(userLink(cfg, u, *host))
+		fmt.Fprintln(os.Stderr, "user added; a running server picks it up within a few seconds")
+	case "list", "ls":
+		for _, u := range cfg.Server.Users {
+			fmt.Printf("%s\t%s\n", u.Name, userLink(cfg, u, *host))
+		}
+	case "link":
+		i := find()
+		if i < 0 {
+			fmt.Fprintf(os.Stderr, "no user %q\n", name)
+			return 1
+		}
+		fmt.Println(userLink(cfg, cfg.Server.Users[i], *host))
+	case "revoke", "rm", "delete":
+		i := find()
+		if i < 0 {
+			fmt.Fprintf(os.Stderr, "no user %q\n", name)
+			return 1
+		}
+		if len(cfg.Server.Users) == 1 {
+			fmt.Fprintln(os.Stderr, "cannot revoke the last user; add another one first")
+			return 1
+		}
+		cfg.Server.Users = append(cfg.Server.Users[:i], cfg.Server.Users[i+1:]...)
+		if err := writeConfig(*path, cfg); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "user %q revoked; a running server disconnects it within a few seconds\n", name)
+	default:
+		return usage()
 	}
 	return 0
 }

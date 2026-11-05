@@ -29,8 +29,8 @@ Usage:
                               print a cypher:// link for the desktop client
   cypher serve [-c FILE]      run a server; on first start creates the config
                               from CYPHER_DOMAIN / CYPHER_EMAIL (for Docker)
-  cypher adduser -c FILE -name NAME   add a user and print its link
-  cypher links -c FILE        print the links of all users
+  cypher user add|list|link|revoke [NAME]
+                              manage server users (applied without a restart)
   cypher version              print the version
 `
 
@@ -48,10 +48,12 @@ func main() {
 		os.Exit(makeLink(os.Args[2:]))
 	case "serve":
 		os.Exit(serve(os.Args[2:]))
-	case "adduser":
-		os.Exit(addUser(os.Args[2:]))
+	case "user", "users":
+		os.Exit(userCmd(os.Args[2:]))
+	case "adduser": // kept for compatibility
+		os.Exit(userCmd(append([]string{"add"}, nameFlag(os.Args[2:])...)))
 	case "links":
-		os.Exit(printLinks(os.Args[2:]))
+		os.Exit(userCmd(append([]string{"list"}, os.Args[2:]...)))
 	case "version", "-v", "--version":
 		fmt.Println("cypher", version)
 	case "help", "-h", "--help":
@@ -92,6 +94,20 @@ func run(cmd string, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// nameFlag turns the old "adduser -name X" form into "add X".
+func nameFlag(args []string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		if (args[i] == "-name" || args[i] == "--name") && i+1 < len(args) {
+			out = append([]string{args[i+1]}, out...)
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
 }
 
 func makeLink(args []string) int {

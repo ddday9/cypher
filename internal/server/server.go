@@ -35,6 +35,9 @@ type Server struct {
 	fallback     *fallback
 	allowPrivate bool
 	resolver     *net.Resolver
+
+	sessMu   sync.Mutex
+	sessions map[protocol.Key]map[*smux.Session]struct{}
 }
 
 // New builds a server from its config section. base resolves relative paths.
@@ -42,27 +45,19 @@ func New(cfg *config.ServerConfig, resolve func(string) string) (*Server, error)
 	if len(cfg.Users) == 0 {
 		return nil, errors.New("server: no users configured")
 	}
-	var users []protocol.User
-	for i, u := range cfg.Users {
-		k, err := protocol.ParseKey(u.Key)
-		if err != nil {
-			return nil, fmt.Errorf("server.users[%d]: %w", i, err)
-		}
-		name := u.Name
-		if name == "" {
-			name = fmt.Sprintf("user%d", i+1)
-		}
-		users = append(users, protocol.User{Name: name, Key: k})
+	users, err := parseUsers(cfg.Users)
+	if err != nil {
+		return nil, err
 	}
 	var getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 	nextProtos := []string{"h2", "http/1.1"}
 	switch {
 	case cfg.ACME != nil:
-		g, err := newACME(cfg.ACME, resolve)
+		cm, err := newACME(cfg.ACME, resolve)
 		if err != nil {
 			return nil, err
 		}
-		getCert = g
+		getCert = cm.get
 		// Lets the CA validate the domain on this port (TLS-ALPN-01).
 		nextProtos = append(nextProtos, acme.ALPNProto)
 	case cfg.CertFile != "" && cfg.KeyFile != "":
@@ -97,7 +92,82 @@ func New(cfg *config.ServerConfig, resolve func(string) string) (*Server, error)
 		fallback:     fb,
 		allowPrivate: cfg.AllowPrivate,
 		resolver:     net.DefaultResolver,
+		sessions:     map[protocol.Key]map[*smux.Session]struct{}{},
 	}, nil
+}
+
+func parseUsers(list []config.UserConfig) ([]protocol.User, error) {
+	var users []protocol.User
+	seen := map[protocol.Key]bool{}
+	for i, u := range list {
+		k, err := protocol.ParseKey(u.Key)
+		if err != nil {
+			return nil, fmt.Errorf("server.users[%d]: %w", i, err)
+		}
+		if seen[k] {
+			return nil, fmt.Errorf("server.users[%d]: duplicate key", i)
+		}
+		seen[k] = true
+		name := u.Name
+		if name == "" {
+			name = fmt.Sprintf("user%d", i+1)
+		}
+		users = append(users, protocol.User{Name: name, Key: k})
+	}
+	return users, nil
+}
+
+// SetUsers applies a new user list without a restart. Sessions of users
+// whose key is no longer listed are closed at once.
+func (s *Server) SetUsers(list []config.UserConfig) error {
+	users, err := parseUsers(list)
+	if err != nil {
+		return err
+	}
+	if len(users) == 0 {
+		return errors.New("no users configured")
+	}
+	s.auth.SetUsers(users)
+	keep := map[protocol.Key]bool{}
+	for _, u := range users {
+		keep[u.Key] = true
+	}
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
+	for k, set := range s.sessions {
+		if keep[k] {
+			continue
+		}
+		for sess := range set {
+			sess.Close()
+		}
+		delete(s.sessions, k)
+		slog.Info("revoked user disconnected", "sessions", len(set))
+	}
+	return nil
+}
+
+func (s *Server) track(k protocol.Key, sess *smux.Session) {
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
+	// The user may have been revoked between authentication and here.
+	if !s.auth.HasKey(k) {
+		sess.Close()
+		return
+	}
+	if s.sessions[k] == nil {
+		s.sessions[k] = map[*smux.Session]struct{}{}
+	}
+	s.sessions[k][sess] = struct{}{}
+}
+
+func (s *Server) untrack(k protocol.Key, sess *smux.Session) {
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
+	delete(s.sessions[k], sess)
+	if len(s.sessions[k]) == 0 {
+		delete(s.sessions, k)
+	}
 }
 
 // ListenAndServe runs until ctx is cancelled.
@@ -166,6 +236,8 @@ func (s *Server) handleConn(raw net.Conn) {
 		return
 	}
 	defer sess.Close()
+	s.track(user.Key, sess)
+	defer s.untrack(user.Key, sess)
 	for {
 		st, err := sess.AcceptStream()
 		if err != nil {
