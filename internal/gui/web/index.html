@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cypher</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand"><span class="logo" aria-hidden="true"></span>cypher</div>
+    <div id="modeChip" class="chip"></div>
+  </header>
+
+  <main>
+    <!-- Home -->
+    <section id="view-home" class="view active">
+      <div id="banner" class="banner hidden"></div>
+
+      <div class="power-wrap">
+        <button id="power" class="power off" aria-label="Подключить">
+          <span class="ring"></span>
+          <svg viewBox="0 0 24 24" class="power-icon" aria-hidden="true"><path d="M12 3v8" /><path d="M6.3 6.8a8 8 0 1 0 11.4 0" /></svg>
+        </button>
+        <div id="statusText" class="status-text">Не подключено</div>
+        <div id="timer" class="timer">&nbsp;</div>
+      </div>
+
+      <div class="speeds">
+        <div class="speed"><span class="arrow up">↑</span><div><b id="upRate">0 Б/с</b><small id="upTotal">0 Б</small></div></div>
+        <div class="speed"><span class="arrow down">↓</span><div><b id="downRate">0 Б/с</b><small id="downTotal">0 Б</small></div></div>
+      </div>
+
+      <div class="segmented" role="tablist" aria-label="Режим">
+        <button data-mode="proxy" class="seg">Прокси</button>
+        <button data-mode="tun" class="seg">Весь трафик (TUN)</button>
+      </div>
+
+      <button id="serverCard" class="card server-card">
+        <div class="server-main">
+          <div class="label">Сервер</div>
+          <div id="serverName" class="server-name">—</div>
+          <div id="serverHost" class="server-host"></div>
+        </div>
+        <div id="serverPing"></div>
+        <span class="chev">›</span>
+      </button>
+
+      <button id="routingCard" class="card routing-card">
+        <div class="server-main">
+          <div class="label">Маршрутизация</div>
+          <div id="routingName" class="server-name">—</div>
+        </div>
+        <span class="chev">›</span>
+      </button>
+    </section>
+
+    <!-- Servers -->
+    <section id="view-servers" class="view">
+      <h2>Серверы</h2>
+      <div class="card import">
+        <textarea id="importText" rows="2" placeholder="Вставьте ссылку cypher:// или адрес подписки https://…"></textarea>
+        <div class="row">
+          <button id="pasteBtn" class="btn ghost">Из буфера</button>
+          <button id="importBtn" class="btn primary">Добавить</button>
+        </div>
+      </div>
+      <div class="row toolbar">
+        <button id="pingBtn" class="btn ghost small">Проверить пинг</button>
+        <button id="refreshSubsBtn" class="btn ghost small">Обновить подписки</button>
+      </div>
+      <div id="serverList"></div>
+    </section>
+
+    <!-- Settings -->
+    <section id="view-settings" class="view">
+      <h2>Настройки</h2>
+
+      <h3>Маршрутизация</h3>
+      <div id="presetList" class="presets"></div>
+      <div id="customBox" class="card hidden">
+        <label class="label" for="customRules">Правила (JSON, как в Xray)</label>
+        <textarea id="customRules" rows="9" spellcheck="false" class="mono"></textarea>
+        <small class="hint">Пример: [{"domain":["geosite:google"],"outbound":"proxy"},{"ip":["geoip:ru"],"outbound":"direct"}]. Что не совпало — через VPN.</small>
+      </div>
+
+      <h3>Подключение</h3>
+      <div class="card list">
+        <label class="item"><span>Системный прокси Windows<small>Включать автоматически в режиме «Прокси»</small></span><input type="checkbox" id="sysProxy" class="switch"></label>
+        <label class="item"><span>Отпечаток TLS<small>Как клиент выглядит для DPI</small></span>
+          <select id="fingerprint">
+            <option value="">Из настроек сервера</option>
+            <option value="firefox">Firefox</option>
+            <option value="chrome">Chrome</option>
+            <option value="safari">Safari</option>
+            <option value="edge">Edge</option>
+            <option value="ios">iOS</option>
+            <option value="random">Случайный</option>
+          </select></label>
+        <label class="item"><span>Порт SOCKS5</span><input type="number" id="socksPort" min="1" max="65535"></label>
+        <label class="item"><span>Порт HTTP</span><input type="number" id="httpPort" min="1" max="65535"></label>
+      </div>
+
+      <h3>Базы geosite / geoip</h3>
+      <div class="card list">
+        <label class="item"><span>Обновлять автоматически<small id="geoUpdated">—</small></span><input type="checkbox" id="geoAuto" class="switch"></label>
+        <div class="item"><span>Обновить сейчас</span><button id="geoBtn" class="btn ghost small">Обновить</button></div>
+        <details class="item-details">
+          <summary>Источники</summary>
+          <label class="label" for="geositeUrl">geosite.dat</label><input id="geositeUrl" type="url">
+          <label class="label" for="geoipUrl">geoip.dat</label><input id="geoipUrl" type="url">
+        </details>
+      </div>
+
+      <h3>Приложение</h3>
+      <div class="card list">
+        <label class="item"><span>Запускать вместе с Windows</span><input type="checkbox" id="autostart" class="switch"></label>
+        <label class="item"><span>Подключаться при запуске</span><input type="checkbox" id="autoConnect" class="switch"></label>
+        <label class="item"><span>Подробность логов</span>
+          <select id="logLevel"><option value="error">Ошибки</option><option value="warn">Предупреждения</option><option value="info">Обычная</option><option value="debug">Отладка</option></select></label>
+      </div>
+      <div class="save-bar"><button id="saveBtn" class="btn primary">Сохранить</button></div>
+      <p id="about" class="about"></p>
+    </section>
+
+    <!-- Logs -->
+    <section id="view-logs" class="view">
+      <div class="row between"><h2>Логи</h2><button id="copyLogs" class="btn ghost small">Копировать</button></div>
+      <pre id="logBox" class="logs mono"></pre>
+    </section>
+  </main>
+
+  <nav class="tabs">
+    <button data-view="home" class="tab active"><svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>Главная</button>
+    <button data-view="servers" class="tab"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>Серверы</button>
+    <button data-view="settings" class="tab"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Настройки</button>
+    <button data-view="logs" class="tab"><svg viewBox="0 0 24 24"><path d="M5 5h14M5 10h14M5 15h9M5 20h6"/></svg>Логи</button>
+  </nav>
+  <div id="toast" class="toast hidden"></div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

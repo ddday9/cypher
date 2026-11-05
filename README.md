@@ -30,7 +30,9 @@
 * **Маршрутизация как в Xray**: `geosite:`, `geoip:`, `domain:`, `full:`,
   `regexp:`, порты, `IPIfNonMatch`.
 
-Подробности: [протокол](docs/protocol.md) · [установка](docs/setup.md).
+Подробности: [протокол](docs/protocol.md) · [установка](docs/setup.md) · [клиент для Windows](docs/gui.md).
+
+<img src="docs/images/gui-home.png" width="240" alt="cypher-gui">
 
 ## Быстрый старт
 
@@ -60,7 +62,7 @@ SOCKS5/HTTP и маршрутизация.
 - [x] Скрипты установки сервера и проверки клиента
 - [x] Режим TUN (Windows/Linux): весь трафик, перехват DNS, сниффинг доменов
 - [ ] Этап 4: транспорты через CDN и QUIC, автоматическое переключение
-- [ ] Служба Windows и иконка в трее
+- [x] Графический клиент для Windows: серверы, подписки, ссылки cypher://, трей, системный прокси, TUN
 
 ## Разработка
 

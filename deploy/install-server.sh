@@ -76,6 +76,9 @@ json.dump(cfg, open(path, "w"), indent=2)
 PY
   systemctl restart cypher
   log "user $ADD_USER added; key: $KEY"
+  HOST_PORT=$(python3 -c "import json;c=json.load(open('$ETC/server.json'));print(c['server'].get('listen',':443'))")
+  echo "Edit the host below if needed:"
+  /usr/local/bin/cypher link -server "$(hostname -f):${HOST_PORT##*:}" -key "$KEY" -name "$ADD_USER" 2>/dev/null || true
   exit 0
 fi
 
@@ -197,6 +200,11 @@ if [[ -n "$NEW_KEY" ]]; then
     }
 EOF
   [[ $SELF_SIGNED -eq 1 ]] && echo "Self-signed: copy $ETC/cert.pem to the client as cert.pem."
+  if [[ $SELF_SIGNED -eq 0 ]]; then
+    echo
+    echo "Link for the desktop client (cypher-gui → Servers → paste):"
+    /usr/local/bin/cypher link -server "$HOST:$PORT" -key "$NEW_KEY" -name "$HOST"
+  fi
 fi
 echo
 echo "Check it: open https://$HOST:$PORT/ in a browser — you should see the website."

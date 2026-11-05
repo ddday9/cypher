@@ -47,6 +47,8 @@ type Client struct {
 	outbounds map[string]client.Outbound
 	router    atomic.Pointer[router.Router]
 
+	traffic Traffic
+
 	reloadMu sync.Mutex
 	watched  []string // files whose changes trigger a routing reload
 }
@@ -103,7 +105,7 @@ func (c *Client) Dispatch(ctx context.Context, inboundTag string, dest netx.Dest
 		return nil, fmt.Errorf("%s via %s: %w", dest, tag, err)
 	}
 	slog.Info("connect", "dest", dest.String(), "outbound", tag)
-	return conn, nil
+	return &countingConn{Conn: conn, t: &c.traffic}, nil
 }
 
 func (c *Client) hasTUN() bool {
@@ -132,7 +134,7 @@ func (c *Client) ListenPacket(ctx context.Context, tag string, dest netx.Destina
 		return nil, fmt.Errorf("udp %s via %s: %w", dest, tag, err)
 	}
 	slog.Info("udp", "dest", dest.String(), "outbound", tag)
-	return pc, nil
+	return &countingPacketConn{PacketConn: pc, t: &c.traffic}, nil
 }
 
 // Run serves all inbounds until ctx is cancelled or one of them fails.
