@@ -1,0 +1,13 @@
+{
+  "log": { "level": "info" },
+  "server": {
+    "listen": ":443",
+    "certFile": "/etc/letsencrypt/live/example.com/fullchain.pem",
+    "keyFile": "/etc/letsencrypt/live/example.com/privkey.pem",
+    "users": [
+      { "name": "my-pc", "key": "REPLACE_WITH_OUTPUT_OF_cypher_genkey" }
+    ],
+    "fallback": { "dir": "/var/www/site" },
+    "allowPrivate": false
+  }
+}

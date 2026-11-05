@@ -1,0 +1,126 @@
+// Package config defines the JSON configuration for client and server.
+package config
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strconv"
+)
+
+// Config is the root of a cypher configuration file. A file with a "server"
+// section runs a server; otherwise it runs a client.
+type Config struct {
+	Log       LogConfig        `json:"log"`
+	Server    *ServerConfig    `json:"server,omitempty"`
+	Inbounds  []InboundConfig  `json:"inbounds,omitempty"`
+	Outbounds []OutboundConfig `json:"outbounds,omitempty"`
+	Routing   RoutingConfig    `json:"routing"`
+
+	// Dir is the directory of the config file (used to resolve relative paths).
+	Dir string `json:"-"`
+}
+
+type LogConfig struct {
+	Level string `json:"level"` // debug, info, warn, error
+}
+
+type ServerConfig struct {
+	Listen   string         `json:"listen"`   // e.g. ":443"
+	CertFile string         `json:"certFile"` // fullchain.pem
+	KeyFile  string         `json:"keyFile"`  // privkey.pem
+	Users    []UserConfig   `json:"users"`
+	Fallback FallbackConfig `json:"fallback"`
+	// AllowPrivate lets clients reach loopback/LAN addresses of the server.
+	AllowPrivate bool `json:"allowPrivate"`
+}
+
+type UserConfig struct {
+	Name string `json:"name"`
+	Key  string `json:"key"`
+}
+
+// FallbackConfig is the website shown to anyone who is not a valid client.
+type FallbackConfig struct {
+	Dir   string `json:"dir,omitempty"`   // serve static files from this directory
+	Proxy string `json:"proxy,omitempty"` // or reverse-proxy to this URL, e.g. http://127.0.0.1:8080
+}
+
+type InboundConfig struct {
+	Tag    string `json:"tag"`
+	Type   string `json:"type"`   // socks, http
+	Listen string `json:"listen"` // 127.0.0.1:10808
+}
+
+type OutboundConfig struct {
+	Tag  string `json:"tag"`
+	Type string `json:"type"` // cypher, direct, block
+
+	// cypher
+	Server      string `json:"server,omitempty"`      // host:port
+	ServerName  string `json:"serverName,omitempty"`  // TLS SNI; defaults to the server host
+	Key         string `json:"key,omitempty"`         // user key from `cypher genkey`
+	Fingerprint string `json:"fingerprint,omitempty"` // chrome, firefox, safari, edge, ios, random
+	CA          string `json:"ca,omitempty"`          // extra CA certificate (PEM) to trust
+	Insecure    bool   `json:"insecure,omitempty"`    // skip certificate verification (testing only)
+}
+
+type RoutingConfig struct {
+	Geosite string `json:"geosite,omitempty"` // path to geosite.dat
+	Geoip   string `json:"geoip,omitempty"`   // path to geoip.dat
+	// DomainStrategy: "AsIs" (default) or "IPIfNonMatch" — resolve the domain
+	// and retry IP rules when no rule matched by domain. Note that
+	// IPIfNonMatch performs local DNS lookups.
+	DomainStrategy string       `json:"domainStrategy,omitempty"`
+	Rules          []RuleConfig `json:"rules,omitempty"`
+	// Default outbound tag; defaults to the first outbound.
+	Default string `json:"default,omitempty"`
+}
+
+// RuleConfig matches when every specified field matches.
+type RuleConfig struct {
+	Domain     []string `json:"domain,omitempty"`
+	IP         []string `json:"ip,omitempty"`
+	Port       PortList `json:"port,omitempty"`
+	Network    string   `json:"network,omitempty"` // "tcp", "udp" or "tcp,udp"
+	InboundTag []string `json:"inboundTag,omitempty"`
+	Outbound   string   `json:"outbound"`
+}
+
+// PortList accepts either a number (443) or a string ("80,443,1000-2000").
+type PortList string
+
+func (p *PortList) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*p = PortList(s)
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(b, &n); err != nil {
+		return fmt.Errorf("port must be a number or a string: %w", err)
+	}
+	*p = PortList(strconv.Itoa(n))
+	return nil
+}
+
+// Load reads and parses a configuration file.
+func Load(path string) (*Config, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var c Config
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&c); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	c.Dir = dirOf(path)
+	return &c, nil
+}

@@ -1,0 +1,23 @@
+[Unit]
+Description=cypher server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cypher
+Group=cypher
+ExecStart=/usr/local/bin/cypher run -c /etc/cypher/server.json
+Restart=on-failure
+RestartSec=3
+# Bind to :443 without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
