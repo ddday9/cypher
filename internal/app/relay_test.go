@@ -116,9 +116,12 @@ func TestRelay(t *testing.T) {
 		}
 	}
 
-	// Direct to the exit, as before: alice's own rules apply.
+	// Direct to the exit, as before: alice's own rules apply. The exit's
+	// links carry its public key; a direct client just ignores it.
 	check("direct", exit.outbound(t, config.OutboundConfig{Key: aliceKey.String()}), []want{
 		{plain, true}, {exitBlocked, false}, {aliceBlocked, false}})
+	check("direct with epk", exit.outbound(t, config.OutboundConfig{Key: aliceKey.String(), ExitPublicKey: epk}), []want{
+		{plain, true}, {aliceBlocked, false}})
 
 	// Through the relay, decrypted there (A): the exit sees the relay.
 	check("relay", relay.outbound(t, config.OutboundConfig{Key: phoneKey.String()}), []want{

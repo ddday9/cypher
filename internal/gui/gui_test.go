@@ -197,3 +197,22 @@ func TestUserRules(t *testing.T) {
 		t.Fatalf("geo rule without files: %v", err)
 	}
 }
+
+// A link printed by a v0.3+ server contains epk (its public key) without
+// ek; nevio must connect directly with it.
+func TestLinkWithExitPublicKeyOnly(t *testing.T) {
+	a, err := NewApp(t.TempDir(), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := "cypher://" + protocol.GenerateKey().String() + "@cypher.example.com:443?epk=f9hJ3azdkCfqN5i8bEuCcuxrfiZsrswwqNQGGxYOdjI#cypher.example.com%20%C2%B7%20phone"
+	if _, err := a.Import(context.Background(), link); err != nil {
+		t.Fatal(err)
+	}
+	p := a.store.Get().Profiles[0]
+	cfg := a.BuildConfig(p, a.Settings())
+	cfg.Inbounds[0].Listen, cfg.Inbounds[1].Listen = "127.0.0.1:0", "127.0.0.1:0"
+	if _, err := app.NewClient(cfg); err != nil {
+		t.Fatalf("link with epk only rejected: %v", err)
+	}
+}

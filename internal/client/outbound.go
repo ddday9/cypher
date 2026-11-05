@@ -187,7 +187,10 @@ func newCypher(cfg config.OutboundConfig, resolve func(string) string) (*Cypher,
 		slog.Info("fingerprint chosen", "outbound", cfg.Tag, "fingerprint", hello.Client)
 	}
 	var e2e *e2eConfig
-	if cfg.ExitKey != "" || cfg.ExitPublicKey != "" {
+	// End to end only with the user's exit key. An exit's own links carry
+	// its public key (epk) too, for setting up relays; alone it means
+	// nothing to a client connecting directly.
+	if cfg.ExitKey != "" {
 		ek, err := protocol.ParseKey(cfg.ExitKey)
 		if err != nil {
 			return nil, fmt.Errorf("cypher outbound: exitKey: %w", err)
