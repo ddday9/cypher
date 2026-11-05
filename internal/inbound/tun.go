@@ -31,6 +31,8 @@ type tunInbound struct {
 	dnsHijack *netx.Destination
 	sniff     bool
 	ctx       context.Context
+
+	loopWarned atomic.Bool
 }
 
 func newTUN(in *Inbound, cfg config.InboundConfig) (*tunInbound, error) {
@@ -105,7 +107,23 @@ func (t *tunInbound) isDNS(dst netip.AddrPort) bool {
 }
 
 // HandleTCP implements tun.Handler.
+// loop reports a flow that comes from one of cypher's own direct sockets:
+// its traffic should have left through the physical interface.
+func (t *tunInbound) loop(network string, src, dst netip.AddrPort) bool {
+	if !netx.IsOwnPort(network, src.Port()) {
+		return false
+	}
+	if t.loopWarned.CompareAndSwap(false, true) {
+		slog.Warn("dropping a routing loop: a direct connection came back into the TUN", "network", network, "dest", dst.String())
+	}
+	return true
+}
+
 func (t *tunInbound) HandleTCP(conn net.Conn, src, dst netip.AddrPort) {
+	if t.loop("tcp", src, dst) {
+		conn.Close()
+		return
+	}
 	ctx := netx.WithSource(t.ctx, "tcp", src)
 	dest := netx.Destination{Network: "tcp", Host: dst.Addr().String(), Port: dst.Port()}
 	var c net.Conn = conn
@@ -138,6 +156,9 @@ func (t *tunInbound) HandleTCP(conn net.Conn, src, dst netip.AddrPort) {
 // datagrams from the application, writes go back to it from dst.
 func (t *tunInbound) HandleUDP(conn net.Conn, src, dst netip.AddrPort) {
 	defer conn.Close()
+	if t.loop("udp", src, dst) {
+		return
+	}
 	dest := netx.Destination{Network: "udp", Host: dst.Addr().String(), Port: dst.Port()}
 	timeout := udpFlowTimeout
 	if t.isDNS(dst) {

@@ -39,16 +39,33 @@ func (c *streamPacketConn) WritePacket(p []byte, to netx.Destination) error {
 func (c *streamPacketConn) Close() error { return c.st.Close() }
 
 // ListenPacket opens a local UDP socket.
-func (d *Direct) ListenPacket(ctx context.Context, _ netx.Destination) (netx.PacketConn, error) {
-	pc, err := netx.ListenUDP(ctx)
+func (d *Direct) ListenPacket(ctx context.Context, dest netx.Destination) (netx.PacketConn, error) {
+	network := "udp"
+	if netx.BoundInterface() != nil {
+		// TUN mode: a socket of the destination's family, so the binding to
+		// the physical interface really applies (see netx.ListenUDP). A TUN
+		// flow has a single destination.
+		if a, ok := dest.Addr(); ok && a.Unmap().Is4() {
+			network = "udp4"
+		} else if ok {
+			network = "udp6"
+		}
+	}
+	pc, err := netx.ListenUDP(ctx, network)
 	if err != nil {
 		return nil, err
 	}
-	return &directPacketConn{pc: pc, resolved: map[string]netip.Addr{}}, nil
+	c := &directPacketConn{pc: pc, resolved: map[string]netip.Addr{}}
+	if netx.BoundInterface() != nil {
+		c.port = netx.AddrPortOf(pc.LocalAddr()).Port()
+		netx.AddOwnPort("udp", c.port)
+	}
+	return c, nil
 }
 
 type directPacketConn struct {
 	pc       *net.UDPConn
+	port     uint16 // registered with netx.AddOwnPort (TUN mode)
 	mu       sync.Mutex
 	resolved map[string]netip.Addr
 }
@@ -87,4 +104,9 @@ func (c *directPacketConn) WritePacket(p []byte, to netx.Destination) error {
 	return err
 }
 
-func (c *directPacketConn) Close() error { return c.pc.Close() }
+func (c *directPacketConn) Close() error {
+	if c.port != 0 {
+		netx.RemoveOwnPort("udp", c.port)
+	}
+	return c.pc.Close()
+}

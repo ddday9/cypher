@@ -15,6 +15,7 @@ import (
 	"net/netip"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -59,7 +60,25 @@ func (d *Direct) Dial(ctx context.Context, dest netx.Destination) (net.Conn, err
 	if orig, ok := netx.OriginalFrom(ctx); ok && orig.Port() == dest.Port {
 		addr = orig.String() // TUN: the domain was only sniffed for routing
 	}
-	return netx.NewDialer(10*time.Second).DialContext(ctx, "tcp", addr)
+	conn, err := netx.NewDialer(10*time.Second).DialContext(ctx, "tcp", addr)
+	if err != nil || netx.BoundInterface() == nil {
+		return conn, err
+	}
+	port := netx.AddrPortOf(conn.LocalAddr()).Port()
+	netx.AddOwnPort("tcp", port)
+	return &ownConn{Conn: conn, port: port}, nil
+}
+
+// ownConn unregisters a direct TCP connection's port when it closes.
+type ownConn struct {
+	net.Conn
+	port uint16
+	once sync.Once
+}
+
+func (c *ownConn) Close() error {
+	c.once.Do(func() { netx.RemoveOwnPort("tcp", c.port) })
+	return c.Conn.Close()
 }
 
 // Block refuses every connection.
