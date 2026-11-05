@@ -2,4 +2,4 @@
 bin
 docs
 *.dat
-cmd/cypher-gui/assets/wintun.dll
+cmd/nevio/assets/wintun.dll

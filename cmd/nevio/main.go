@@ -1,5 +1,5 @@
-// Command cypher-gui is the desktop client: a window with the interface, a
-// tray icon, and the cypher core running inside the same process.
+// Command nevio is the desktop client: a window with the interface, a tray
+// icon, and the cypher core running inside the same process.
 package main
 
 import (
@@ -48,7 +48,7 @@ func notifyRunning(dir string) bool {
 }
 
 func openLog(dir string) io.Writer {
-	path := filepath.Join(dir, "cypher.log")
+	path := filepath.Join(dir, "nevio.log")
 	if st, err := os.Stat(path); err == nil && st.Size() > 5<<20 {
 		os.Rename(path, path+".old")
 	}
@@ -92,7 +92,7 @@ func main() {
 	}
 	li, _ := json.Marshal(lockInfo{Addr: srv.Addr(), Token: srv.Token(), PID: os.Getpid()})
 	os.WriteFile(filepath.Join(dir, "gui.json"), li, 0o600)
-	slog.Info("cypher-gui started", "version", version, "ui", srv.Addr())
+	slog.Info("nevio started", "version", version, "ui", srv.Addr())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	app.Background(ctx)
@@ -113,7 +113,7 @@ func main() {
 }
 
 func fatal(err error) {
-	fmt.Fprintln(os.Stderr, "cypher-gui:", err)
+	fmt.Fprintln(os.Stderr, "nevio:", err)
 	showError(err.Error())
 	os.Exit(1)
 }

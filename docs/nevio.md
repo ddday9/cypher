@@ -1,4 +1,11 @@
-# Клиент для Windows (cypher-gui)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/nevio-logo-dark.png">
+  <img src="images/nevio-logo-light.png" height="64" alt="nevio">
+</picture>
+
+# nevio — клиент для Windows
+
+nevio — графический клиент протокола cypher.
 
 <p>
 <img src="images/gui-home.png" width="260" alt="Главный экран">
@@ -8,7 +15,7 @@
 
 ## Установка
 
-1. Соберите `cypher-gui.exe` (на любой машине с Go 1.26+, например на Linux-ВМ):
+1. Соберите `nevio.exe` (на любой машине с Go 1.26+, например на Linux-ВМ):
 
 ```bash
 make gui
@@ -21,7 +28,7 @@ make gui
 make gui-icon gui
 ```
 
-2. Положите `bin/cypher-gui.exe` в любую папку, например `C:\Program Files\cypher\`
+2. Положите `bin/nevio.exe` в любую папку, например `C:\Program Files\cypher\`
    или `%LOCALAPPDATA%\cypher\`, и запустите. Нужен WebView2 Runtime — он уже
    есть в Windows 10/11; если его нет, интерфейс откроется в браузере.
 
@@ -83,8 +90,8 @@ make gui-icon gui
 
 ## Где лежат данные
 
-`%APPDATA%\cypher\`: `state.json` (серверы и настройки), `geosite.dat`,
-`geoip.dat`, `cypher.log`, `webview2\` (данные окна).
+`%APPDATA%\nevio\`: `state.json` (серверы и настройки), `geosite.dat`,
+`geoip.dat`, `nevio.log`, `webview2\` (данные окна).
 
 ## Ограничения
 

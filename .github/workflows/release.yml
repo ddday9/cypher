@@ -68,12 +68,12 @@ jobs:
         run: |
           set -euo pipefail
           # Icon and manifest for the executable.
-          (cd cmd/cypher-gui && go run github.com/tc-hib/go-winres@v0.3.3 simply \
+          (cd cmd/nevio && go run github.com/tc-hib/go-winres@v0.3.3 simply \
             --icon assets/app.ico --manifest gui --arch amd64 \
-            --product-name cypher --file-description "cypher VPN client" \
-            --original-filename cypher-gui.exe --file-version "${VERSION#v}" --product-version "${VERSION#v}")
+            --product-name nevio --file-description "nevio VPN client" \
+            --original-filename nevio.exe --file-version "${VERSION#v}" --product-version "${VERSION#v}")
           make gui VERSION="$VERSION"
-          cp bin/cypher-gui.exe "dist/cypher-gui-windows-amd64.exe"
+          cp bin/nevio.exe "dist/nevio-windows-amd64.exe"
 
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
@@ -85,8 +85,8 @@ jobs:
           set -euo pipefail
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           cat > notes.md <<NOTES
-          ## Клиент для Windows
-          \`cypher-gui-windows-amd64.exe\` — графический клиент (Wintun встроен). Положите в отдельную папку и запустите.
+          ## nevio — клиент для Windows
+          \`nevio-windows-amd64.exe\` — графический клиент (Wintun встроен). Положите в отдельную папку и запустите.
 
           ## Сервер в Docker
           \`\`\`

@@ -87,13 +87,21 @@ type Store struct {
 	st  State
 }
 
-// DataDir returns %APPDATA%\cypher (or the OS equivalent).
+// DataDir returns %APPDATA%\nevio (or the OS equivalent). Data of
+// earlier versions in %APPDATA%\cypher is moved there on first start.
 func DataDir() string {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		base = "."
 	}
-	return filepath.Join(base, "cypher")
+	dir := filepath.Join(base, "nevio")
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		old := filepath.Join(base, "cypher")
+		if _, err := os.Stat(filepath.Join(old, "state.json")); err == nil {
+			os.Rename(old, dir)
+		}
+	}
+	return dir
 }
 
 // OpenStore loads (or creates) the state in dir.

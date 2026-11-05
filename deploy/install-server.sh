@@ -220,7 +220,7 @@ EOF
   [[ $SELF_SIGNED -eq 1 ]] && echo "Self-signed: copy $ETC/cert.pem to the client as cert.pem."
   if [[ $SELF_SIGNED -eq 0 ]]; then
     echo
-    echo "Link for the desktop client (cypher-gui → Servers → paste):"
+    echo "Link for the desktop client (nevio → Servers → paste):"
     /usr/local/bin/cypher user link user1 -c $ETC/server.json
     echo
     echo "The certificate is requested now; watch for 'certificate ready': journalctl -u cypher -f"

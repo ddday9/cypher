@@ -30,8 +30,8 @@ button { cursor: pointer; }
 .mono { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 12px; }
 
 .top { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 4px; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 17px; letter-spacing: .3px; }
-.logo { width: 22px; height: 22px; border-radius: 7px; background: conic-gradient(from 210deg, var(--accent), #3aa6ff, var(--accent)); box-shadow: 0 0 0 3px #3ddc9722; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 19px; letter-spacing: .2px; }
+.logo { width: 26px; height: 26px; border-radius: 8px; box-shadow: 0 0 0 3px #3ddc9722; }
 .chip { font-size: 12px; color: var(--muted); background: var(--bg2); border: 1px solid var(--line); padding: 3px 10px; border-radius: 99px; }
 .chip.on { color: var(--accent); border-color: #3ddc9755; }
 

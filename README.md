@@ -30,14 +30,21 @@
 * **Маршрутизация как в Xray**: `geosite:`, `geoip:`, `domain:`, `full:`,
   `regexp:`, порты, `IPIfNonMatch`.
 
-Подробности: [протокол](docs/protocol.md) · [установка](docs/setup.md) · [клиент для Windows](docs/gui.md).
+Подробности: [протокол](docs/protocol.md) · [установка](docs/setup.md) · [клиент nevio для Windows](docs/nevio.md) · [отличия от Xray и план против блокировок](docs/comparison.md).
 
-<img src="docs/images/gui-home.png" width="240" alt="cypher-gui">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/nevio-logo-dark.png">
+  <img src="docs/images/nevio-logo-light.png" height="48" alt="nevio">
+</picture>
+
+**nevio** — клиент для Windows:
+
+<img src="docs/images/gui-home.png" width="240" alt="nevio">
 
 ## Быстрый старт
 
 Готовые сборки — в [Releases](https://github.com/ddday9/cypher/releases):
-клиент для Windows `cypher-gui-windows-amd64.exe` и образ сервера
+клиент для Windows `nevio-windows-amd64.exe` и образ сервера
 `ghcr.io/ddday9/cypher`.
 
 Сервер на Linux в Docker ([подробно](docs/docker.md)):

@@ -17,7 +17,7 @@ func showError(string) {}
 // runUI on Linux/macOS serves the interface in the browser (useful for
 // development); Ctrl+C exits.
 func runUI(_ *gui.App, srv *gui.Server, minimized, _ bool) {
-	fmt.Println("cypher-gui: open", srv.URL())
+	fmt.Println("nevio: open", srv.URL())
 	open := func() {
 		for _, cmd := range []string{"xdg-open", "open"} {
 			if exec.Command(cmd, srv.URL()).Start() == nil {

@@ -35,7 +35,7 @@ const (
 )
 
 func showError(msg string) {
-	t, _ := windows.UTF16PtrFromString("cypher")
+	t, _ := windows.UTF16PtrFromString("nevio")
 	m, _ := windows.UTF16PtrFromString(msg)
 	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(m)), uintptr(unsafe.Pointer(t)), mbIconErr)
 }
@@ -73,7 +73,7 @@ func (win *window) open() {
 			AutoFocus: true,
 			DataPath:  win.data,
 			WindowOptions: webview2.WindowOptions{
-				Title: "cypher", Width: 430, Height: 780, Center: true, IconId: 1,
+				Title: "nevio", Width: 430, Height: 780, Center: true, IconId: 1,
 			},
 		})
 		if w == nil {
@@ -129,9 +129,9 @@ func runUI(app *gui.App, srv *gui.Server, minimized, browser bool) {
 
 	systray.Run(func() {
 		systray.SetIcon(trayOff)
-		systray.SetTooltip("cypher — не подключено")
+		systray.SetTooltip("nevio — не подключено")
 		systray.SetOnTapped(show)
-		mOpen := systray.AddMenuItem("Открыть cypher", "")
+		mOpen := systray.AddMenuItem("Открыть nevio", "")
 		mToggle := systray.AddMenuItem("Подключить", "")
 		mTUN := systray.AddMenuItemCheckbox("Весь трафик (TUN)", "", app.Settings().Mode == "tun")
 		systray.AddSeparator()
@@ -180,11 +180,11 @@ func runUI(app *gui.App, srv *gui.Server, minimized, browser bool) {
 				last = on
 				if on == 1 {
 					systray.SetIcon(trayOn)
-					systray.SetTooltip("cypher — подключено")
+					systray.SetTooltip("nevio — подключено")
 					mToggle.SetTitle("Отключить")
 				} else {
 					systray.SetIcon(trayOff)
-					systray.SetTooltip("cypher — не подключено")
+					systray.SetTooltip("nevio — не подключено")
 					mToggle.SetTitle("Подключить")
 				}
 			}

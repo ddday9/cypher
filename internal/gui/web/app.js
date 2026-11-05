@@ -87,7 +87,7 @@ async function busy(btn, fn) {
 
 function handleError(e) {
   if (e.code === "need_elevation") {
-    showBanner("Для режима «Весь трафик» нужны права администратора. Перезапустить cypher с правами?", true);
+    showBanner("Для режима «Весь трафик» нужны права администратора. Перезапустить nevio с правами?", true);
     return;
   }
   toast(e.message, true);
@@ -314,7 +314,7 @@ function fillSettings() {
   $("autostart").checked = draft.autostart;
   $("autoConnect").checked = draft.autoConnect;
   $("logLevel").value = draft.logLevel || "info";
-  $("about").textContent = `cypher ${info.version} · данные: ${info.dataDir}`;
+  $("about").textContent = `nevio ${info.version} · протокол cypher · данные: ${info.dataDir}`;
   settingsDirty = false;
 }
 

@@ -1,7 +1,7 @@
 bin/
 *.dat
 /config.json
-/cypher-gui
+/nevio
 /cypher
-cmd/cypher-gui/assets/wintun.dll
-cmd/cypher-gui/*.syso
+cmd/nevio/assets/wintun.dll
+cmd/nevio/*.syso

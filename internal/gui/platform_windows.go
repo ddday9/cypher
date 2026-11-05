@@ -35,8 +35,9 @@ func setAutostart(on bool) error {
 		return err
 	}
 	defer k.Close()
+	k.DeleteValue("Cypher") // value written by versions named cypher-gui
 	if !on {
-		err := k.DeleteValue("Cypher")
+		err := k.DeleteValue("nevio")
 		if err == registry.ErrNotExist {
 			return nil
 		}
@@ -46,5 +47,5 @@ func setAutostart(on bool) error {
 	if err != nil {
 		return err
 	}
-	return k.SetStringValue("Cypher", `"`+exe+`" --minimized`)
+	return k.SetStringValue("nevio", `"`+exe+`" --minimized`)
 }

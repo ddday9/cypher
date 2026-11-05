@@ -21,7 +21,7 @@ clean:
 # --- desktop client (Windows) ----------------------------------------------
 WINTUN_URL := https://www.wintun.net/builds/wintun-0.14.1.zip
 WINTUN_SHA256 := e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce
-WINTUN_DLL := cmd/cypher-gui/assets/wintun.dll
+WINTUN_DLL := cmd/nevio/assets/wintun.dll
 
 .PHONY: gui gui-icon
 
@@ -34,10 +34,10 @@ $(WINTUN_DLL):
 
 # Optional: exe icon and manifest (needs network access to fetch go-winres).
 gui-icon:
-	cd cmd/cypher-gui && go run github.com/tc-hib/go-winres@v0.3.3 simply \
+	cd cmd/nevio && go run github.com/tc-hib/go-winres@v0.3.3 simply \
 		--icon assets/app.ico --manifest gui --arch amd64 \
-		--product-name cypher --file-description "cypher VPN client" --original-filename cypher-gui.exe
+		--product-name nevio --file-description "nevio VPN client" --original-filename nevio.exe
 
 gui: $(WINTUN_DLL)
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -tags wintun \
-		-ldflags "$(LDFLAGS) -H windowsgui" -o bin/cypher-gui.exe ./cmd/cypher-gui
+		-ldflags "$(LDFLAGS) -H windowsgui" -o bin/nevio.exe ./cmd/nevio
