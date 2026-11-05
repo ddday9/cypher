@@ -3,6 +3,7 @@ package netx
 import (
 	"context"
 	"net"
+	"net/netip"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -29,6 +30,11 @@ func BoundInterface() *Interface { return bound.Load() }
 func control(network, address string, c syscall.RawConn) error {
 	iface := bound.Load()
 	if iface == nil {
+		return nil
+	}
+	// Loopback never goes through the TUN, and binding it to the physical
+	// interface would make it unreachable on some systems.
+	if ap, err := netip.ParseAddrPort(address); err == nil && ap.Addr().IsLoopback() {
 		return nil
 	}
 	return bindSocket(network, address, c, iface)

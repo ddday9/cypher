@@ -20,6 +20,29 @@ jobs:
       - run: go test -race ./...
       - run: GOOS=windows go build -o /dev/null ./cmd/nevio
 
+  # A real Wintun adapter on Windows (the runner has administrator rights):
+  # the "Весь трафик (TUN)" mode of nevio.
+  windows-tun:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install wintun.dll
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://www.wintun.net/builds/wintun-0.14.1.zip -OutFile wintun.zip
+          $hash = (Get-FileHash wintun.zip -Algorithm SHA256).Hash
+          if ($hash -ne "07C256185D6EE3652E09FA55C0B673E2624B565E02C4B9091C79CA7D2F24EF51") { throw "wintun.zip hash $hash" }
+          Expand-Archive wintun.zip -DestinationPath wintun
+          Copy-Item wintun\wintun\bin\amd64\wintun.dll C:\Windows\System32\
+      - name: TUN test
+        shell: bash
+        env:
+          CYPHER_TUN_TEST: "1"
+        run: go test -count=1 -run 'TestWindowsTUN|TestTunnel|TestRelay' -v ./internal/app/
+
   android:
     runs-on: ubuntu-latest
     steps:
