@@ -105,6 +105,26 @@ func (c *Client) Dispatch(ctx context.Context, inboundTag string, dest netx.Dest
 	return conn, nil
 }
 
+// RoutePacket implements inbound.Dispatcher.
+func (c *Client) RoutePacket(ctx context.Context, inboundTag string, dest netx.Destination) string {
+	dest.Network = "udp"
+	return c.router.Load().Route(ctx, router.Metadata{InboundTag: inboundTag, Dest: dest})
+}
+
+// ListenPacket implements inbound.Dispatcher.
+func (c *Client) ListenPacket(ctx context.Context, tag string, dest netx.Destination) (netx.PacketConn, error) {
+	o, ok := c.outbounds[tag]
+	if !ok {
+		return nil, fmt.Errorf("unknown outbound %q", tag)
+	}
+	pc, err := o.ListenPacket(ctx, dest)
+	if err != nil {
+		return nil, fmt.Errorf("udp %s via %s: %w", dest, tag, err)
+	}
+	slog.Info("udp", "dest", dest.String(), "outbound", tag)
+	return pc, nil
+}
+
 // Run serves all inbounds until ctx is cancelled or one of them fails.
 func (c *Client) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)

@@ -102,3 +102,10 @@ func (c *PrefixConn) Read(p []byte) (int, error) {
 type Dialer interface {
 	Dial(ctx context.Context, dest Destination) (net.Conn, error)
 }
+
+// PacketConn sends and receives datagrams to and from arbitrary destinations.
+type PacketConn interface {
+	ReadPacket(p []byte) (n int, from Destination, err error)
+	WritePacket(p []byte, to Destination) error
+	Close() error
+}

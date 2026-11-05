@@ -166,7 +166,12 @@ func (s *Server) handleStream(st *smux.Stream, user *protocol.User) {
 		slog.Debug("bad request", "user", user.Name, "err", err)
 		return
 	}
-	if req.Cmd != protocol.CmdTCP {
+	switch req.Cmd {
+	case protocol.CmdTCP:
+	case protocol.CmdUDP:
+		s.handleUDP(st, user)
+		return
+	default:
 		st.Write([]byte{protocol.StatusFailure})
 		return
 	}

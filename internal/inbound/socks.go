@@ -19,7 +19,8 @@ import (
 const (
 	socksVersion = 5
 
-	socksCmdConnect = 1
+	socksCmdConnect      = 1
+	socksCmdUDPAssociate = 3
 
 	socksAtypIPv4   = 1
 	socksAtypDomain = 3
@@ -98,9 +99,12 @@ func (in *Inbound) handleSOCKS(ctx context.Context, conn net.Conn) {
 	if _, err := io.ReadFull(conn, pb[:]); err != nil {
 		return
 	}
+	if req[1] == socksCmdUDPAssociate {
+		in.handleUDPAssociate(ctx, conn)
+		return
+	}
 	if req[1] != socksCmdConnect {
-		// UDP ASSOCIATE and BIND are not supported yet.
-		socksReply(conn, socksRepCmdUnsupported)
+		socksReply(conn, socksRepCmdUnsupported) // BIND
 		return
 	}
 	dest, err := netx.ParseDestination("tcp", net.JoinHostPort(host, strconv.Itoa(int(binary.BigEndian.Uint16(pb[:])))))

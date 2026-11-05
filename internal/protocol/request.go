@@ -1,11 +1,9 @@
 package protocol
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"net/netip"
 	"time"
 
 	"github.com/ddday9/cypher/internal/netx"
@@ -16,10 +14,7 @@ const (
 	requestVersion = 1
 
 	CmdTCP byte = 1
-
-	atypIPv4   byte = 1
-	atypDomain byte = 3
-	atypIPv6   byte = 4
+	CmdUDP byte = 3
 )
 
 // Stream status codes sent by the server after it tries to reach the target.
@@ -55,31 +50,18 @@ type Request struct {
 
 // WriteRequest encodes ver | cmd | atyp | addr | port.
 func WriteRequest(w io.Writer, req Request) error {
-	buf := []byte{requestVersion, req.Cmd}
-	if a, ok := req.Dest.Addr(); ok {
-		if a.Is4() {
-			b := a.As4()
-			buf = append(append(buf, atypIPv4), b[:]...)
-		} else {
-			b := a.As16()
-			buf = append(append(buf, atypIPv6), b[:]...)
-		}
-	} else {
-		if len(req.Dest.Host) > 255 {
-			return errors.New("domain name too long")
-		}
-		buf = append(buf, atypDomain, byte(len(req.Dest.Host)))
-		buf = append(buf, req.Dest.Host...)
+	buf, err := netx.AppendAddr([]byte{requestVersion, req.Cmd}, req.Dest)
+	if err != nil {
+		return err
 	}
-	buf = binary.BigEndian.AppendUint16(buf, req.Dest.Port)
-	_, err := w.Write(buf)
+	_, err = w.Write(buf)
 	return err
 }
 
 // ReadRequest decodes a stream header.
 func ReadRequest(r io.Reader) (Request, error) {
 	var req Request
-	var hdr [3]byte
+	var hdr [2]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return req, err
 	}
@@ -87,39 +69,58 @@ func ReadRequest(r io.Reader) (Request, error) {
 		return req, fmt.Errorf("unsupported request version %d", hdr[0])
 	}
 	req.Cmd = hdr[1]
-	switch hdr[2] {
-	case atypIPv4:
-		var b [4]byte
-		if _, err := io.ReadFull(r, b[:]); err != nil {
-			return req, err
-		}
-		req.Dest.Host = netip.AddrFrom4(b).String()
-	case atypIPv6:
-		var b [16]byte
-		if _, err := io.ReadFull(r, b[:]); err != nil {
-			return req, err
-		}
-		req.Dest.Host = netip.AddrFrom16(b).Unmap().String()
-	case atypDomain:
-		var l [1]byte
-		if _, err := io.ReadFull(r, l[:]); err != nil {
-			return req, err
-		}
-		b := make([]byte, l[0])
-		if _, err := io.ReadFull(r, b); err != nil {
-			return req, err
-		}
-		req.Dest.Host = netx.NormalizeHost(string(b))
-	default:
-		return req, fmt.Errorf("unknown address type %d", hdr[2])
+	network := "tcp"
+	if req.Cmd == CmdUDP {
+		network = "udp"
 	}
-	var p [2]byte
-	if _, err := io.ReadFull(r, p[:]); err != nil {
+	d, err := netx.ReadAddr(r, network)
+	if err != nil {
 		return req, err
 	}
-	req.Dest.Port = binary.BigEndian.Uint16(p[:])
-	req.Dest.Network = "tcp"
+	req.Dest = d
 	return req, nil
+}
+
+// MaxPacketSize is the largest UDP payload carried over a UDP stream.
+const MaxPacketSize = 65535
+
+var errPacketTooLarge = errors.New("packet too large")
+
+// AppendPacket encodes one datagram on a UDP stream:
+//
+//	atyp | addr | port | length(2 BE) | payload
+//
+// The address is the destination (client→server) or the source (server→client).
+func AppendPacket(b []byte, addr netx.Destination, p []byte) ([]byte, error) {
+	if len(p) > MaxPacketSize {
+		return nil, errPacketTooLarge
+	}
+	b, err := netx.AppendAddr(b, addr)
+	if err != nil {
+		return nil, err
+	}
+	b = append(b, byte(len(p)>>8), byte(len(p)))
+	return append(b, p...), nil
+}
+
+// ReadPacket decodes one datagram into buf.
+func ReadPacket(r io.Reader, buf []byte) (int, netx.Destination, error) {
+	addr, err := netx.ReadAddr(r, "udp")
+	if err != nil {
+		return 0, addr, err
+	}
+	var l [2]byte
+	if _, err := io.ReadFull(r, l[:]); err != nil {
+		return 0, addr, err
+	}
+	n := int(l[0])<<8 | int(l[1])
+	if n > len(buf) {
+		return 0, addr, errPacketTooLarge
+	}
+	if _, err := io.ReadFull(r, buf[:n]); err != nil {
+		return 0, addr, err
+	}
+	return n, addr, nil
 }
 
 // MuxConfig is the smux configuration shared by both ends.

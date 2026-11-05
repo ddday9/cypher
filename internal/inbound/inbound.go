@@ -17,6 +17,10 @@ import (
 // Dispatcher routes a destination to an outbound and dials it.
 type Dispatcher interface {
 	Dispatch(ctx context.Context, inboundTag string, dest netx.Destination) (net.Conn, error)
+	// RoutePacket picks the outbound for a UDP destination.
+	RoutePacket(ctx context.Context, inboundTag string, dest netx.Destination) string
+	// ListenPacket opens a UDP association on the given outbound.
+	ListenPacket(ctx context.Context, outboundTag string, dest netx.Destination) (netx.PacketConn, error)
 }
 
 // Inbound is a local listener.

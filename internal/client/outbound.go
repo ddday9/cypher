@@ -2,6 +2,7 @@
 package client
 
 import (
+	"bufio"
 	"context"
 	"crypto/x509"
 	"errors"
@@ -22,6 +23,9 @@ import (
 // Outbound is a named way of reaching a destination.
 type Outbound interface {
 	netx.Dialer
+	// ListenPacket opens a UDP association; dest is the first destination
+	// (used for logging), every packet carries its own address.
+	ListenPacket(ctx context.Context, dest netx.Destination) (netx.PacketConn, error)
 	Tag() string
 	Close() error
 }
@@ -59,6 +63,10 @@ var ErrBlocked = errors.New("blocked by routing rules")
 func (b *Block) Tag() string  { return b.tag }
 func (b *Block) Close() error { return nil }
 func (b *Block) Dial(context.Context, netx.Destination) (net.Conn, error) {
+	return nil, ErrBlocked
+}
+
+func (b *Block) ListenPacket(context.Context, netx.Destination) (netx.PacketConn, error) {
 	return nil, ErrBlocked
 }
 
@@ -174,6 +182,19 @@ func (c *Cypher) connect(ctx context.Context) (*smux.Session, *protocol.RecordCo
 
 // Dial opens a stream to dest through the server.
 func (c *Cypher) Dial(ctx context.Context, dest netx.Destination) (net.Conn, error) {
+	return c.openStream(ctx, protocol.Request{Cmd: protocol.CmdTCP, Dest: dest})
+}
+
+// ListenPacket opens a UDP association through the server.
+func (c *Cypher) ListenPacket(ctx context.Context, dest netx.Destination) (netx.PacketConn, error) {
+	st, err := c.openStream(ctx, protocol.Request{Cmd: protocol.CmdUDP, Dest: dest})
+	if err != nil {
+		return nil, err
+	}
+	return &streamPacketConn{st: st, br: bufio.NewReader(st)}, nil
+}
+
+func (c *Cypher) openStream(ctx context.Context, req protocol.Request) (*smux.Stream, error) {
 	var lastErr error
 	var bad *tunnel
 	for attempt := 0; attempt < 2; attempt++ {
@@ -186,9 +207,9 @@ func (c *Cypher) Dial(ctx context.Context, dest netx.Destination) (net.Conn, err
 			lastErr, bad = err, t
 			continue // tunnel is dead; try another one
 		}
-		conn, err := c.request(ctx, st, dest)
+		err = c.request(ctx, st, req)
 		if err == nil {
-			return conn, nil
+			return st, nil
 		}
 		var se protocol.StatusError
 		if errors.As(err, &se) {
@@ -199,25 +220,25 @@ func (c *Cypher) Dial(ctx context.Context, dest netx.Destination) (net.Conn, err
 	return nil, lastErr
 }
 
-func (c *Cypher) request(ctx context.Context, st *smux.Stream, dest netx.Destination) (net.Conn, error) {
+func (c *Cypher) request(ctx context.Context, st *smux.Stream, req protocol.Request) error {
 	deadline := time.Now().Add(20 * time.Second)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
 	st.SetDeadline(deadline)
-	if err := protocol.WriteRequest(st, protocol.Request{Cmd: protocol.CmdTCP, Dest: dest}); err != nil {
+	if err := protocol.WriteRequest(st, req); err != nil {
 		st.Close()
-		return nil, err
+		return err
 	}
 	var status [1]byte
 	if _, err := st.Read(status[:]); err != nil {
 		st.Close()
-		return nil, err
+		return err
 	}
 	if status[0] != protocol.StatusOK {
 		st.Close()
-		return nil, protocol.StatusError(status[0])
+		return protocol.StatusError(status[0])
 	}
 	st.SetDeadline(time.Time{})
-	return st, nil
+	return nil
 }
