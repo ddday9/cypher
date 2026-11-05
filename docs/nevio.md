@@ -15,7 +15,10 @@ nevio — графический клиент протокола cypher. Все 
 
 ## Установка
 
-1. Соберите `nevio.exe` (на любой машине с Go 1.26+, например на Linux-ВМ):
+1. Скачайте `nevio-windows-amd64.exe` со страницы
+   [Releases](https://github.com/ddday9/cypher/releases/latest).
+
+   Или соберите сами (на любой машине с Go 1.26+, например на Linux-ВМ):
 
 ```bash
 make gui
@@ -28,7 +31,7 @@ make gui
 make gui-icon gui
 ```
 
-2. Положите `bin/nevio.exe` в любую папку, например `C:\Program Files\cypher\`
+2. Положите exe в любую папку, например `C:\Program Files\cypher\`
    или `%LOCALAPPDATA%\cypher\`, и запустите. Нужен WebView2 Runtime — он уже
    есть в Windows 10/11; если его нет, интерфейс откроется в браузере.
 

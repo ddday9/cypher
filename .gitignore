@@ -5,3 +5,4 @@ bin/
 /cypher
 cmd/nevio/assets/wintun.dll
 cmd/nevio/*.syso
+*.pid
