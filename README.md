@@ -33,6 +33,12 @@
 * **Маршрутизация как в Xray**: `geosite:`, `geoip:`, `domain:`, `full:`,
   `regexp:`, порты, `IPIfNonMatch`.
 
+## Документация
+
+* **[Сервер и ретранслятор — полное руководство](docs/server.md)**: установка (Docker, systemd), все параметры `server.json`, переменные окружения, пользователи, маршрутизация, ретранслятор в РФ, диагностика.
+* **[Клиент — полное руководство](docs/client.md)**: nevio (все экраны и настройки), консольный клиент, ссылки `cypher://`, все параметры `config.json`, правила, TUN, работа через ретранслятор.
+* Быстрый старт: [сервер в Docker](docs/docker.md) · [установка без Docker и клиент](docs/setup.md) · [ретранслятор](docs/relay.md) · [nevio](docs/nevio.md).
+
 Подробности: [протокол](docs/protocol.md) · [установка](docs/setup.md) · [ретранслятор в РФ](docs/relay.md) · [клиент nevio для Windows](docs/nevio.md) · [отличия от Xray и план против блокировок](docs/comparison.md).
 
 <picture>

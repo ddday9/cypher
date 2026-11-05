@@ -54,7 +54,7 @@ jobs:
             ext=""; [ "$os" = windows ] && ext=".exe"
             GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
               -ldflags "-s -w -X main.version=$VERSION" -o "$out/cypher$ext" ./cmd/cypher
-            cp -r examples "$out/"
+            cp -r examples docs "$out/"
             cp README.md "$out/"
             if [ "$os" = linux ]; then
               cp -r deploy "$out/"
@@ -94,9 +94,14 @@ jobs:
           \`\`\`
           Инструкция: [docs/docker.md](https://github.com/$GITHUB_REPOSITORY/blob/$VERSION/docs/docker.md).
 
+          ## Документация
+          * [Сервер и ретранслятор — все настройки](https://github.com/$GITHUB_REPOSITORY/blob/$VERSION/docs/server.md)
+          * [Клиент (nevio и консольный) — все настройки](https://github.com/$GITHUB_REPOSITORY/blob/$VERSION/docs/client.md)
+          * [Ретранслятор в России](https://github.com/$GITHUB_REPOSITORY/blob/$VERSION/docs/relay.md)
+
           ## Остальное
-          * \`cypher-linux-*.tar.gz\` — бинарник, скрипты \`deploy/\` (docker-compose с nginx, systemd), примеры конфигов.
-          * \`cypher-windows-amd64.zip\` — консольный клиент.
+          * \`cypher-linux-*.tar.gz\` — бинарник, скрипты \`deploy/\` (docker-compose с nginx, systemd), примеры конфигов, документация \`docs/\`.
+          * \`cypher-windows-amd64.zip\` — консольный клиент, примеры, документация.
           * \`SHA256SUMS\` — контрольные суммы.
           NOTES
           if gh release view "$VERSION" >/dev/null 2>&1; then

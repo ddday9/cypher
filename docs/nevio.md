@@ -5,7 +5,7 @@
 
 # nevio — клиент для Windows
 
-nevio — графический клиент протокола cypher.
+nevio — графический клиент протокола cypher. Все настройки подробно — в [полном руководстве по клиенту](client.md).
 
 <p>
 <img src="images/gui-home.png" width="260" alt="Главный экран">
