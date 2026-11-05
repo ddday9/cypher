@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ddday9/cypher/internal/config"
@@ -84,8 +83,7 @@ type Cypher struct {
 	roots      *x509.CertPool
 	insecure   bool
 
-	mu   sync.Mutex
-	sess *smux.Session
+	pool *pool
 }
 
 func newCypher(cfg config.OutboundConfig, resolve func(string) string) (*Cypher, error) {
@@ -129,6 +127,11 @@ func newCypher(cfg config.OutboundConfig, resolve func(string) string) (*Cypher,
 		}
 		c.roots = pool
 	}
+	rot, err := parseRotation(cfg.Rotation)
+	if err != nil {
+		return nil, fmt.Errorf("cypher outbound: %w", err)
+	}
+	c.pool = newPool(c.tag, cfg.Connections, rot, c.connect)
 	if c.insecure {
 		slog.Warn("cypher outbound: certificate verification is disabled (insecure: true) — use only for testing", "tag", c.tag)
 	}
@@ -138,20 +141,15 @@ func newCypher(cfg config.OutboundConfig, resolve func(string) string) (*Cypher,
 func (c *Cypher) Tag() string { return c.tag }
 
 func (c *Cypher) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.sess != nil {
-		c.sess.Close()
-		c.sess = nil
-	}
+	c.pool.close()
 	return nil
 }
 
-func (c *Cypher) connect(ctx context.Context) (*smux.Session, error) {
+func (c *Cypher) connect(ctx context.Context) (*smux.Session, *protocol.RecordConn, error) {
 	d := net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	raw, err := d.DialContext(ctx, "tcp", c.server)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	uc := utls.UClient(raw, &utls.Config{
 		ServerName:         c.serverName,
@@ -162,52 +160,31 @@ func (c *Cypher) connect(ctx context.Context) (*smux.Session, error) {
 	defer cancel()
 	if err := uc.HandshakeContext(hctx); err != nil {
 		raw.Close()
-		return nil, fmt.Errorf("tls handshake: %w", err)
+		return nil, nil, fmt.Errorf("tls handshake: %w", err)
 	}
 	rc := protocol.NewRecordConn(uc, protocol.BuildAuth(c.key, time.Now()))
 	sess, err := smux.Client(rc, protocol.MuxConfig())
 	if err != nil {
 		uc.Close()
-		return nil, err
+		return nil, nil, err
 	}
-	slog.Info("connected to server", "outbound", c.tag, "server", c.server)
-	return sess, nil
-}
-
-// session returns the shared session, reconnecting if it is closed or is the
-// session that just failed (bad). Comparing against bad keeps concurrent
-// failures from tearing down each other's fresh sessions.
-func (c *Cypher) session(ctx context.Context, bad *smux.Session) (*smux.Session, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.sess != nil && !c.sess.IsClosed() && c.sess != bad {
-		return c.sess, nil
-	}
-	if c.sess != nil {
-		c.sess.Close()
-	}
-	sess, err := c.connect(ctx)
-	if err != nil {
-		c.sess = nil
-		return nil, err
-	}
-	c.sess = sess
-	return sess, nil
+	slog.Debug("connected to server", "outbound", c.tag, "server", c.server)
+	return sess, rc, nil
 }
 
 // Dial opens a stream to dest through the server.
 func (c *Cypher) Dial(ctx context.Context, dest netx.Destination) (net.Conn, error) {
 	var lastErr error
-	var bad *smux.Session
+	var bad *tunnel
 	for attempt := 0; attempt < 2; attempt++ {
-		sess, err := c.session(ctx, bad)
+		t, err := c.pool.get(ctx, bad)
 		if err != nil {
 			return nil, err
 		}
-		st, err := sess.OpenStream()
+		st, err := t.sess.OpenStream()
 		if err != nil {
-			lastErr, bad = err, sess
-			continue // session is dead; reconnect once
+			lastErr, bad = err, t
+			continue // tunnel is dead; try another one
 		}
 		conn, err := c.request(ctx, st, dest)
 		if err == nil {
@@ -217,7 +194,7 @@ func (c *Cypher) Dial(ctx context.Context, dest netx.Destination) (net.Conn, err
 		if errors.As(err, &se) {
 			return nil, err // the server answered; reconnecting will not help
 		}
-		lastErr, bad = err, sess
+		lastErr, bad = err, t
 	}
 	return nil, lastErr
 }

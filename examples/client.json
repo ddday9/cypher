@@ -10,7 +10,9 @@
       "type": "cypher",
       "server": "example.com:443",
       "key": "REPLACE_WITH_THE_SAME_KEY_AS_ON_THE_SERVER",
-      "fingerprint": "chrome"
+      "fingerprint": "chrome",
+      "connections": 2,
+      "rotation": { "age": "5m-20m", "megabytes": "64-512", "idle": "1m-3m" }
     },
     { "tag": "direct", "type": "direct" },
     { "tag": "block",  "type": "block" }

@@ -66,6 +66,21 @@ type OutboundConfig struct {
 	Fingerprint string `json:"fingerprint,omitempty"` // chrome, firefox, safari, edge, ios, random
 	CA          string `json:"ca,omitempty"`          // extra CA certificate (PEM) to trust
 	Insecure    bool   `json:"insecure,omitempty"`    // skip certificate verification (testing only)
+
+	// Connections is how many TLS connections to keep in parallel (default 2).
+	Connections int             `json:"connections,omitempty"`
+	Rotation    *RotationConfig `json:"rotation,omitempty"`
+}
+
+// RotationConfig controls how long a tunnel connection lives. Each value is
+// a range ("5m-20m"); every connection draws its own random limit. When a
+// limit is hit the connection takes no new streams and closes once its
+// existing streams finish.
+type RotationConfig struct {
+	Disabled  bool   `json:"disabled,omitempty"`
+	Age       string `json:"age,omitempty"`       // default "5m-20m"
+	Megabytes string `json:"megabytes,omitempty"` // default "64-512"
+	Idle      string `json:"idle,omitempty"`      // close when unused for; default "1m-3m"
 }
 
 type RoutingConfig struct {

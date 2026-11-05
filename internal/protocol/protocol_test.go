@@ -117,3 +117,64 @@ func TestRequestRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// frame builds a smux v2 frame.
+func frame(cmd byte, sid uint32, data []byte) []byte {
+	f := []byte{smuxVersion, cmd, byte(len(data)), byte(len(data) >> 8),
+		byte(sid), byte(sid >> 8), byte(sid >> 16), byte(sid >> 24)}
+	return append(f, data...)
+}
+
+// wireRecords writes frames through a RecordConn and returns the sizes of
+// the records seen on the wire (data, padding).
+func wireRecords(t *testing.T, frames [][]byte) [][2]int {
+	t.Helper()
+	a, b := net.Pipe()
+	w := NewRecordConn(a, nil)
+	w.written = earlyRecords // skip session-start shaping
+	go func() {
+		for _, f := range frames {
+			w.Write(f)
+		}
+		a.Close()
+	}()
+	var recs [][2]int
+	for {
+		var hdr [4]byte
+		if _, err := io.ReadFull(b, hdr[:]); err != nil {
+			return recs
+		}
+		d, p := int(hdr[0])<<8|int(hdr[1]), int(hdr[2])<<8|int(hdr[3])
+		io.CopyN(io.Discard, b, int64(d+p))
+		recs = append(recs, [2]int{d, p})
+	}
+}
+
+func TestStreamStartIsShaped(t *testing.T) {
+	big := make([]byte, 12000)
+	var frames [][]byte
+	for range earlyStreamFrame {
+		frames = append(frames, frame(smuxCmdPSH, 7, big))
+	}
+	frames = append(frames, frame(smuxCmdPSH, 7, big)) // past the early phase
+	recs := wireRecords(t, frames)
+
+	last := recs[len(recs)-1]
+	if last[0] != len(big)+smuxHeaderLen || last[1] != 0 {
+		t.Fatalf("late frame should be one unpadded record, got %v", last)
+	}
+	for _, r := range recs[:len(recs)-1] {
+		if r[0] > shapedChunkMax {
+			t.Fatalf("early frame chunk too large: %v", r)
+		}
+	}
+	if len(recs) < 2*earlyStreamFrame {
+		t.Fatalf("early frames were not split: %d records", len(recs))
+	}
+
+	// A new stream (new sid) is shaped again, even mid-session.
+	recs = wireRecords(t, [][]byte{frame(smuxCmdPSH, 9, big)})
+	if len(recs) < 2 {
+		t.Fatalf("new stream not shaped: %v", recs)
+	}
+}
