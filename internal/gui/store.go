@@ -53,6 +53,7 @@ type Settings struct {
 	GeoipURL      string    `json:"geoipUrl"`
 	GeoUpdated    time.Time `json:"geoUpdated"`
 	Fingerprint   string    `json:"fingerprint,omitempty"` // overrides profiles when set
+	AntiFreeze    string    `json:"antiFreeze,omitempty"`  // auto (default), on, off; overrides profiles
 	LogLevel      string    `json:"logLevel"`
 }
 

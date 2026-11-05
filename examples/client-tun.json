@@ -22,7 +22,8 @@
       "type": "cypher",
       "server": "example.com:443",
       "key": "REPLACE_WITH_THE_SAME_KEY_AS_ON_THE_SERVER",
-      "fingerprint": "firefox"
+      "fingerprint": "firefox",
+      "antiFreeze": "auto"
     },
     {
       "tag": "direct",

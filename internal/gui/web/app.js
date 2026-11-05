@@ -147,6 +147,7 @@ function renderPower(status) {
 function renderHome() {
   const s = state;
   renderPower(s.status);
+  $("afBadge").classList.toggle("hidden", !(s.status === "connected" && s.antiFreeze));
   $("timer").textContent = s.status === "connected" ? duration(Date.now() - Date.parse(s.since)) : " ";
 
   const now = Date.now();
@@ -308,6 +309,7 @@ function fillSettings() {
   $("defaultAction").value = draft.defaultAction || "proxy";
   $("sysProxy").checked = draft.systemProxy;
   $("fingerprint").value = draft.fingerprint || "";
+  $("antiFreeze").value = draft.antiFreeze || "";
   $("socksPort").value = draft.socksPort;
   $("httpPort").value = draft.httpPort;
   renderGeo();
@@ -429,6 +431,7 @@ $("saveBtn").addEventListener("click", (e) => busy(e.target, async () => {
   s.defaultAction = $("defaultAction").value;
   s.systemProxy = $("sysProxy").checked;
   s.fingerprint = $("fingerprint").value;
+  s.antiFreeze = $("antiFreeze").value;
   s.socksPort = Number($("socksPort").value);
   s.httpPort = Number($("httpPort").value);
   s.geoSource = $("geoSource").value;

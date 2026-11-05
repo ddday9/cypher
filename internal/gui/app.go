@@ -154,6 +154,10 @@ func (a *App) BuildConfig(p Profile, s Settings) *config.Config {
 	if s.Fingerprint != "" {
 		fp = s.Fingerprint
 	}
+	antiFreeze := p.AntiFreeze
+	if s.AntiFreeze != "" {
+		antiFreeze = s.AntiFreeze
+	}
 	cfg := &config.Config{Dir: a.dir}
 	cfg.Log.Level = s.LogLevel
 	socks := config.InboundConfig{Tag: "socks", Type: "socks", Listen: "127.0.0.1:" + strconv.Itoa(s.SocksPort)}
@@ -165,7 +169,7 @@ func (a *App) BuildConfig(p Profile, s Settings) *config.Config {
 	}
 	cfg.Outbounds = []config.OutboundConfig{
 		{Tag: "proxy", Type: "cypher", Server: p.Server, ServerName: p.ServerName, Key: p.Key,
-			Fingerprint: fp, Connections: p.Connections},
+			Fingerprint: fp, Connections: p.Connections, AntiFreeze: antiFreeze},
 		{Tag: "direct", Type: "direct"},
 		{Tag: "block", Type: "block"},
 	}
@@ -212,7 +216,10 @@ func (a *App) Connect(ctx context.Context) error {
 	}
 	cfg := a.BuildConfig(p, s)
 	if needsGeo(cfg.Routing.Rules) && !a.haveGeo() {
-		if err := a.UpdateGeo(ctx); err != nil {
+		a.setBusy("Загружаю базы geosite и geoip…")
+		err := a.UpdateGeo(ctx)
+		a.setBusy("")
+		if err != nil {
 			return fmt.Errorf("%w (без баз geosite/geoip правила маршрутизации не работают; можно выбрать «Всё через VPN»)", err)
 		}
 	}

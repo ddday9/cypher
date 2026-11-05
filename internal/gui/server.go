@@ -346,6 +346,12 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	switch in.AntiFreeze {
+	case "", "auto", "on", "off":
+	default:
+		writeErr(w, errors.New("защита от заморозки: auto, on или off"))
+		return
+	}
 	switch in.DefaultAction {
 	case "", "proxy", "direct":
 	default:

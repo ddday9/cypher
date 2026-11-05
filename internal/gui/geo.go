@@ -28,13 +28,12 @@ func (a *App) haveGeo() bool {
 }
 
 // UpdateGeo downloads both geo files. A running client picks the new files
-// up by itself, without reconnecting.
+// up by itself, without reconnecting. It does not mark the app busy: a
+// background refresh must never block the connect button.
 func (a *App) UpdateGeo(ctx context.Context) error {
 	a.geoMu.Lock()
 	defer a.geoMu.Unlock()
 	st := a.store.Get().Settings
-	a.setBusy("Загружаю базы geosite и geoip…")
-	defer a.setBusy("")
 	for _, f := range []struct{ url, name string }{{st.GeositeURL, geositeFile}, {st.GeoipURL, geoipFile}} {
 		if f.url == "" {
 			return fmt.Errorf("не задана ссылка на %s", f.name)

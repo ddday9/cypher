@@ -52,3 +52,14 @@ func (c *countingPacketConn) WritePacket(p []byte, to netx.Destination) error {
 	}
 	return err
 }
+
+// AntiFreezeActive reports whether any tunnel outbound currently uses the
+// anti-freeze (short connections) mode.
+func (c *Client) AntiFreezeActive() bool {
+	for _, o := range c.outbounds {
+		if a, ok := o.(interface{ AntiFreezeActive() bool }); ok && a.AntiFreezeActive() {
+			return true
+		}
+	}
+	return false
+}

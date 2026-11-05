@@ -1,7 +1,7 @@
 // Package links encodes server profiles as share links and parses
 // subscriptions (lists of links).
 //
-//	cypher://KEY@host:port?sni=NAME&fp=FINGERPRINT&conn=N#Display%20name
+//	cypher://KEY@host:port?sni=NAME&fp=FINGERPRINT&conn=N&af=auto#Display%20name
 package links
 
 import (
@@ -26,6 +26,7 @@ type Link struct {
 	ServerName  string `json:"serverName,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
 	Connections int    `json:"connections,omitempty"`
+	AntiFreeze  string `json:"antiFreeze,omitempty"` // auto, on, off
 }
 
 // Format returns the share link.
@@ -40,6 +41,9 @@ func Format(l Link) string {
 	}
 	if l.Connections > 0 {
 		q.Set("conn", strconv.Itoa(l.Connections))
+	}
+	if l.AntiFreeze != "" {
+		q.Set("af", l.AntiFreeze)
 	}
 	u.RawQuery = q.Encode()
 	return u.String()
@@ -73,6 +77,10 @@ func Parse(s string) (Link, error) {
 		if n, err := strconv.Atoi(c); err == nil && n > 0 && n <= 16 {
 			l.Connections = n
 		}
+	}
+	switch af := q.Get("af"); af {
+	case "auto", "on", "off":
+		l.AntiFreeze = af
 	}
 	l.Name = u.Fragment
 	if l.Name == "" {

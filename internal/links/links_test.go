@@ -10,7 +10,7 @@ import (
 
 func TestRoundTrip(t *testing.T) {
 	l := Link{Name: "Нидерланды #1", Server: "nl.example.com:8443", Key: protocol.GenerateKey().String(),
-		ServerName: "cdn.example.com", Fingerprint: "chrome", Connections: 3}
+		ServerName: "cdn.example.com", Fingerprint: "chrome", Connections: 3, AntiFreeze: "on"}
 	got, err := Parse(Format(l))
 	if err != nil || got != l {
 		t.Fatalf("got %+v err %v\nlink %s", got, err, Format(l))

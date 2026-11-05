@@ -117,6 +117,9 @@ type State struct {
 	Up     int64     `json:"up"`
 	Down   int64     `json:"down"`
 	Error  string    `json:"error,omitempty"`
+	// AntiFreeze: traffic currently goes over short connections because
+	// connection freezes were detected (or the mode is always on).
+	AntiFreeze bool `json:"antiFreeze,omitempty"`
 }
 
 // State returns the current status and traffic.
@@ -127,6 +130,7 @@ func (e *Engine) State() State {
 	if e.client != nil {
 		st.Since = e.since
 		st.Up, st.Down = e.client.Traffic()
+		st.AntiFreeze = e.client.AntiFreezeActive()
 	}
 	return st
 }

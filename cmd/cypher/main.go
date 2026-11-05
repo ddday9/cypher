@@ -117,6 +117,7 @@ func makeLink(args []string) int {
 	name := fs.String("name", "", "display name")
 	sni := fs.String("sni", "", "TLS server name, if different from the host")
 	fp := fs.String("fp", "", "fingerprint: firefox, chrome, safari, edge, ios, random")
+	af := fs.String("af", "", "anti-freeze: auto, on, off")
 	fs.Parse(args)
 	if *server == "" || *key == "" {
 		fmt.Fprintln(os.Stderr, "usage: cypher link -server HOST:PORT -key KEY [-name NAME]")
@@ -126,7 +127,7 @@ func makeLink(args []string) int {
 		fmt.Fprintln(os.Stderr, "key:", err)
 		return 1
 	}
-	fmt.Println(links.Format(links.Link{Name: *name, Server: *server, Key: *key, ServerName: *sni, Fingerprint: *fp}))
+	fmt.Println(links.Format(links.Link{Name: *name, Server: *server, Key: *key, ServerName: *sni, Fingerprint: *fp, AntiFreeze: *af}))
 	return 0
 }
 

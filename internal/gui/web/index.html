@@ -26,6 +26,7 @@
         </button>
         <div id="statusText" class="status-text">Не подключено</div>
         <div id="timer" class="timer">&nbsp;</div>
+        <div id="afBadge" class="af-badge hidden" title="Оператор замораживал соединения — трафик идёт короткими соединениями. Скорость ниже обычной.">защита от заморозки</div>
       </div>
 
       <div class="speeds">
@@ -116,6 +117,12 @@
             <option value="edge">Edge</option>
             <option value="ios">iOS</option>
             <option value="random">Случайный</option>
+          </select></label>
+        <label class="item"><span>Защита от заморозки<small>Короткие соединения, если оператор «замораживает» трафик</small></span>
+          <select id="antiFreeze">
+            <option value="">Авто</option>
+            <option value="on">Всегда</option>
+            <option value="off">Выключена</option>
           </select></label>
         <label class="item"><span>Порт SOCKS5</span><input type="number" id="socksPort" min="1" max="65535"></label>
         <label class="item"><span>Порт HTTP</span><input type="number" id="httpPort" min="1" max="65535"></label>

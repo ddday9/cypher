@@ -40,6 +40,9 @@ type Server struct {
 
 	router atomic.Pointer[router.Router]
 
+	// upstream is where client traffic leaves the server.
+	upstream Upstream
+
 	sessMu   sync.Mutex
 	sessions map[protocol.Key]map[*smux.Session]struct{}
 
@@ -101,7 +104,23 @@ func New(cfg *config.ServerConfig, resolve func(string) string) (*Server, error)
 		resolver:     net.DefaultResolver,
 		sessions:     map[protocol.Key]map[*smux.Session]struct{}{},
 		segs:         map[[16]byte]*segEntry{},
+		upstream:     directUpstream{},
 	}, nil
+}
+
+// Upstream is where the server sends client traffic. Today that is the
+// internet directly. It is the hook for chaining servers later: a relay
+// would implement it with a cypher outbound to the next server (and
+// announce protocol.CapRelay).
+type Upstream interface {
+	DialTCP(ctx context.Context, addr netip.AddrPort) (net.Conn, error)
+}
+
+type directUpstream struct{}
+
+func (directUpstream) DialTCP(ctx context.Context, addr netip.AddrPort) (net.Conn, error) {
+	var d net.Dialer
+	return d.DialContext(ctx, "tcp", addr.String())
 }
 
 // serverCaps are the protocol v2 features this server offers.
@@ -329,14 +348,13 @@ func (s *Server) dial(ctx context.Context, dest netx.Destination) (net.Conn, byt
 		}
 		addrs = res
 	}
-	var d net.Dialer
 	status := protocol.StatusNotAllowed
 	for _, a := range addrs {
 		a = a.Unmap()
 		if !s.allowPrivate && isPrivate(a) {
 			continue
 		}
-		c, err := d.DialContext(ctx, "tcp", netip.AddrPortFrom(a, dest.Port).String())
+		c, err := s.upstream.DialTCP(ctx, netip.AddrPortFrom(a, dest.Port))
 		if err == nil {
 			return c, protocol.StatusOK
 		}
