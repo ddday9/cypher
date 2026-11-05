@@ -205,9 +205,9 @@ func TestAuthExtension(t *testing.T) {
 	}
 	hdr := BuildAuthExt(k, time.Now(), ext)
 	hdr[AuthHeaderSize+5] ^= 1 // flip a flag bit
-	c1, c2 = net.Pipe()
-	go func() { c2.Write(hdr); c2.Close() }()
-	if res, _, err := a.ReadAuthExt(c1); err != nil || res.Ext != nil {
+	c3, c4 := net.Pipe()
+	go func() { c4.Write(hdr); c4.Close() }()
+	if res, _, err := a.ReadAuthExt(c3); err != nil || res.Ext != nil {
 		t.Fatalf("forged ext accepted: %+v %v", res, err)
 	}
 }
