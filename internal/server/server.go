@@ -100,6 +100,9 @@ func New(cfg *config.ServerConfig, resolve func(string) string) (*Server, error)
 	}, nil
 }
 
+// serverCaps are the protocol v2 features this server offers.
+const serverCaps = protocol.CapPing
+
 func parseUsers(list []config.UserConfig) ([]protocol.User, error) {
 	var users []protocol.User
 	seen := map[protocol.Key]bool{}
@@ -221,7 +224,7 @@ func (s *Server) handleConn(raw net.Conn) {
 		return
 	}
 	tc.SetDeadline(time.Now().Add(authTimeout))
-	user, prefix, err := s.auth.ReadAuth(tc)
+	res, prefix, err := s.auth.ReadAuthExt(tc)
 	if errors.Is(err, protocol.ErrNotAuthenticated) {
 		slog.Debug("not a client, serving fallback", "remote", raw.RemoteAddr().String())
 		s.fallback.serve(tc, prefix)
@@ -232,9 +235,25 @@ func (s *Server) handleConn(raw net.Conn) {
 		return
 	}
 	tc.SetDeadline(time.Time{})
-	slog.Info("client connected", "user", user.Name, "remote", raw.RemoteAddr().String())
+	user := res.User
+	rc := protocol.NewRecordConn(tc, nil)
+	version := 1
+	if res.Ext != nil && res.Ext.Flags&protocol.FlagV2 != 0 {
+		// Protocol v2: answer pings and announce what this server supports.
+		version = 2
+		rc.SetControlHandler(func(typ byte, body []byte) {
+			if typ == protocol.CtlPing {
+				rc.WriteControl(protocol.CtlPong, body)
+			}
+		})
+		if err := rc.WriteControl(protocol.CtlHello, protocol.Hello(serverCaps)); err != nil {
+			tc.Close()
+			return
+		}
+	}
+	slog.Info("client connected", "user", user.Name, "remote", raw.RemoteAddr().String(), "protocol", version)
 
-	sess, err := smux.Server(protocol.NewRecordConn(tc, nil), protocol.MuxConfig())
+	sess, err := smux.Server(rc, protocol.MuxConfig())
 	if err != nil {
 		tc.Close()
 		return

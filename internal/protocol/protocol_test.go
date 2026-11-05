@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"fmt"
 	"crypto/rand"
 	"errors"
 	"io"
@@ -176,5 +177,58 @@ func TestStreamStartIsShaped(t *testing.T) {
 	recs = wireRecords(t, [][]byte{frame(smuxCmdPSH, 9, big)})
 	if len(recs) < 2 {
 		t.Fatalf("new stream not shaped: %v", recs)
+	}
+}
+
+func TestAuthExtension(t *testing.T) {
+	k := GenerateKey()
+	a := NewAuthenticator([]User{{Name: "u", Key: k}})
+	ext := &Ext{Flags: FlagV2 | FlagSegmented, Seq: 7}
+	rand.Read(ext.Session[:])
+	for range 50 {
+		hdr := BuildAuthExt(k, time.Now(), ext)
+		if len(hdr) < AuthHeaderSize+extSize || len(hdr) > AuthHeaderSize+maxAuthPadding {
+			t.Fatalf("length %d", len(hdr))
+		}
+		c1, c2 := net.Pipe()
+		go func() { c2.Write(hdr); c2.Close() }()
+		res, _, err := a.ReadAuthExt(c1)
+		if err != nil || res.Ext == nil || *res.Ext != *ext {
+			t.Fatalf("ext round trip: %+v %v", res, err)
+		}
+	}
+	// A v1 client (no extension) and a forged extension both read as nil.
+	c1, c2 := net.Pipe()
+	go func() { c2.Write(BuildAuth(k, time.Now())); c2.Close() }()
+	if res, _, err := a.ReadAuthExt(c1); err != nil || res.Ext != nil {
+		t.Fatalf("v1 client: %+v %v", res, err)
+	}
+	hdr := BuildAuthExt(k, time.Now(), ext)
+	hdr[AuthHeaderSize+5] ^= 1 // flip a flag bit
+	c1, c2 = net.Pipe()
+	go func() { c2.Write(hdr); c2.Close() }()
+	if res, _, err := a.ReadAuthExt(c1); err != nil || res.Ext != nil {
+		t.Fatalf("forged ext accepted: %+v %v", res, err)
+	}
+}
+
+func TestControlRecords(t *testing.T) {
+	a, b := net.Pipe()
+	w, r := NewRecordConn(a, nil), NewRecordConn(b, nil)
+	got := make(chan string, 4)
+	r.SetControlHandler(func(typ byte, body []byte) { got <- fmt.Sprintf("%d:%s", typ, body) })
+	go func() {
+		w.WriteControl(CtlHello, []byte("hi"))
+		w.Write([]byte("data"))
+		w.WriteControl(CtlPing, []byte("p"))
+		w.Write([]byte("more"))
+		a.Close()
+	}()
+	all, _ := io.ReadAll(r)
+	if string(all) != "datamore" {
+		t.Fatalf("data mixed with control records: %q", all)
+	}
+	if g1, g2 := <-got, <-got; g1 != "1:hi" || g2 != "2:p" {
+		t.Fatalf("control: %s %s", g1, g2)
 	}
 }

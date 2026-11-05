@@ -11,8 +11,8 @@ import (
 )
 
 // pipeDial returns a dial func backed by in-memory smux servers.
-func pipeDial(t *testing.T, dials *int) func(context.Context) (*smux.Session, *protocol.RecordConn, error) {
-	return func(context.Context) (*smux.Session, *protocol.RecordConn, error) {
+func pipeDial(t *testing.T, dials *int) func(context.Context) (*link, error) {
+	return func(context.Context) (*link, error) {
 		*dials++
 		a, b := net.Pipe()
 		srv, _ := smux.Server(protocol.NewRecordConn(b, nil), protocol.MuxConfig())
@@ -28,7 +28,7 @@ func pipeDial(t *testing.T, dials *int) func(context.Context) (*smux.Session, *p
 		rc := protocol.NewRecordConn(a, nil)
 		sess, err := smux.Client(rc, protocol.MuxConfig())
 		t.Cleanup(func() { sess.Close(); srv.Close() })
-		return sess, rc, err
+		return &link{sess: sess, rc: rc}, err
 	}
 }
 

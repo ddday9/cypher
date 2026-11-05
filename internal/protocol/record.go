@@ -9,6 +9,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const (
@@ -40,6 +41,15 @@ const (
 
 var errBadRecord = errors.New("malformed record")
 
+// controlBit marks a control record in the padLen field. Padding never
+// exceeds MaxRecordPayload (< 0x4000), so the top bits are free. Control
+// records are only sent to peers that negotiated protocol version 2.
+const controlBit = 0x8000
+
+// ControlHandler receives control records. It runs on the reading
+// goroutine and must not block.
+type ControlHandler func(typ byte, body []byte)
+
 // RecordConn frames traffic into padded records:
 //
 //	dataLen uint16 | padLen uint16 | data | padding
@@ -61,6 +71,58 @@ type RecordConn struct {
 	frames  map[uint32]int // data frames written per smux stream
 
 	bytesIn, bytesOut atomic.Int64
+	lastRead          atomic.Int64 // unix nanos of the last record received
+
+	onControl atomic.Pointer[ControlHandler]
+}
+
+// SetControlHandler installs the handler for control records.
+func (c *RecordConn) SetControlHandler(h ControlHandler) { c.onControl.Store(&h) }
+
+// LastRead returns when the last record arrived from the peer.
+func (c *RecordConn) LastRead() time.Time { return time.Unix(0, c.lastRead.Load()) }
+
+// readRecord reads one record into c.rbuf and returns its data and whether
+// it is a control record.
+func (c *RecordConn) readRecord() ([]byte, bool, error) {
+	var hdr [recordHeaderSize]byte
+	if _, err := io.ReadFull(c.r, hdr[:]); err != nil {
+		return nil, false, err
+	}
+	dataLen := int(binary.BigEndian.Uint16(hdr[0:]))
+	padField := binary.BigEndian.Uint16(hdr[2:])
+	control := padField&controlBit != 0
+	padLen := int(padField &^ controlBit)
+	if dataLen+padLen > MaxRecordPayload {
+		return nil, false, errBadRecord
+	}
+	if _, err := io.ReadFull(c.r, c.rbuf[:dataLen]); err != nil {
+		return nil, false, err
+	}
+	if _, err := c.r.Discard(padLen); err != nil {
+		return nil, false, err
+	}
+	c.lastRead.Store(time.Now().UnixNano())
+	return c.rbuf[:dataLen], control, nil
+}
+
+// WriteControl sends a control record (protocol version 2 peers only).
+func (c *RecordConn) WriteControl(typ byte, body []byte) error {
+	if 1+len(body) > MaxRecordPayload-64 {
+		return errBadRecord
+	}
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	padLen := rand.IntN(65)
+	buf := make([]byte, 0, recordHeaderSize+1+len(body)+padLen)
+	buf = binary.BigEndian.AppendUint16(buf, uint16(1+len(body)))
+	buf = binary.BigEndian.AppendUint16(buf, uint16(padLen)|controlBit)
+	buf = append(buf, typ)
+	buf = append(buf, body...)
+	buf = append(buf, make([]byte, padLen)...)
+	_, err := c.Conn.Write(buf)
+	c.written++
+	return err
 }
 
 // NewRecordConn wraps conn. prefix, if non-nil, is written in front of the
@@ -84,22 +146,17 @@ func (c *RecordConn) Read(p []byte) (int, error) {
 	c.rmu.Lock()
 	defer c.rmu.Unlock()
 	for len(c.leftover) == 0 {
-		var hdr [recordHeaderSize]byte
-		if _, err := io.ReadFull(c.r, hdr[:]); err != nil {
+		data, control, err := c.readRecord()
+		if err != nil {
 			return 0, err
 		}
-		dataLen := int(binary.BigEndian.Uint16(hdr[0:]))
-		padLen := int(binary.BigEndian.Uint16(hdr[2:]))
-		if dataLen+padLen > MaxRecordPayload {
-			return 0, errBadRecord
+		if control {
+			if h := c.onControl.Load(); h != nil && len(data) > 0 {
+				(*h)(data[0], append([]byte(nil), data[1:]...))
+			}
+			continue
 		}
-		if _, err := io.ReadFull(c.r, c.rbuf[:dataLen]); err != nil {
-			return 0, err
-		}
-		if _, err := c.r.Discard(padLen); err != nil {
-			return 0, err
-		}
-		c.leftover = c.rbuf[:dataLen]
+		c.leftover = data
 	}
 	n := copy(p, c.leftover)
 	c.leftover = c.leftover[n:]

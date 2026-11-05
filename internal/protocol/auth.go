@@ -82,10 +82,19 @@ func isHTTPStart(b byte) bool { return b >= 'A' && b <= 'Z' }
 
 // BuildAuth returns the auth header followed by random padding. The client
 // sends it as the first bytes inside the TLS tunnel.
-func BuildAuth(key Key, now time.Time) []byte {
+func BuildAuth(key Key, now time.Time) []byte { return BuildAuthExt(key, now, nil) }
+
+// BuildAuthExt is BuildAuth with a protocol extension carried inside the
+// padding. Servers of version 1 discard the padding, so the extension is
+// invisible to them and the connection works as version 1.
+func BuildAuthExt(key Key, now time.Time, ext *Ext) []byte {
 	var pl [2]byte
 	rand.Read(pl[:])
 	padLen := int(binary.BigEndian.Uint16(pl[:])) % (maxAuthPadding + 1)
+	if ext != nil {
+		// Room for the extension; the length stays uniformly random.
+		padLen = extSize + int(binary.BigEndian.Uint16(pl[:]))%(maxAuthPadding-extSize+1)
+	}
 
 	buf := make([]byte, AuthHeaderSize+padLen)
 	for {
@@ -100,6 +109,9 @@ func BuildAuth(key Key, now time.Time) []byte {
 	binary.BigEndian.PutUint16(buf[nonceSize+timestampSize:], uint16(padLen))
 	copy(buf[nonceSize+timestampSize+padLenSize:], computeMAC(key, buf))
 	rand.Read(buf[AuthHeaderSize:])
+	if ext != nil {
+		ext.encode(buf[AuthHeaderSize:], key, buf[:nonceSize])
+	}
 	return buf
 }
 
@@ -194,6 +206,22 @@ func (a *Authenticator) verify(hdr []byte) (*User, int, bool) {
 // caller can replay them into the fallback website. Any other error is an
 // I/O error and the connection should simply be closed.
 func (a *Authenticator) ReadAuth(conn net.Conn) (*User, []byte, error) {
+	res, prefix, err := a.ReadAuthExt(conn)
+	if res == nil {
+		return nil, prefix, err
+	}
+	return res.User, prefix, err
+}
+
+// AuthResult is a verified client: its user and, for clients of version 2
+// or later, the extension it sent.
+type AuthResult struct {
+	User *User
+	Ext  *Ext // nil for version 1 clients
+}
+
+// ReadAuthExt is ReadAuth that also returns the client's extension.
+func (a *Authenticator) ReadAuthExt(conn net.Conn) (*AuthResult, []byte, error) {
 	buf := make([]byte, AuthHeaderSize)
 	n := 0
 	for n < AuthHeaderSize {
@@ -216,8 +244,9 @@ func (a *Authenticator) ReadAuth(conn net.Conn) (*User, []byte, error) {
 	if padLen > maxAuthPadding {
 		return nil, buf, ErrNotAuthenticated
 	}
-	if _, err := io.CopyN(io.Discard, conn, int64(padLen)); err != nil {
+	pad := make([]byte, padLen)
+	if _, err := io.ReadFull(conn, pad); err != nil {
 		return nil, nil, err
 	}
-	return user, nil, nil
+	return &AuthResult{User: user, Ext: parseExt(pad, user.Key, buf[:nonceSize])}, nil, nil
 }

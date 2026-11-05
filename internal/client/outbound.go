@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/x509"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -213,14 +214,14 @@ func (c *Cypher) Close() error {
 	return nil
 }
 
-func (c *Cypher) connect(ctx context.Context) (*smux.Session, *protocol.RecordConn, error) {
+func (c *Cypher) connect(ctx context.Context) (*link, error) {
 	addr := c.server
 	if p := c.pinned.Load(); p != nil {
 		addr = *p
 	}
 	raw, err := netx.NewDialer(10*time.Second).DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	uc := utls.UClient(raw, &utls.Config{
 		ServerName:         c.serverName,
@@ -231,16 +232,31 @@ func (c *Cypher) connect(ctx context.Context) (*smux.Session, *protocol.RecordCo
 	defer cancel()
 	if err := uc.HandshakeContext(hctx); err != nil {
 		raw.Close()
-		return nil, nil, fmt.Errorf("tls handshake: %w", err)
+		return nil, fmt.Errorf("tls handshake: %w", err)
 	}
-	rc := protocol.NewRecordConn(uc, protocol.BuildAuth(c.key, time.Now()))
+	ext := &protocol.Ext{Flags: protocol.FlagV2}
+	rc := protocol.NewRecordConn(uc, protocol.BuildAuthExt(c.key, time.Now(), ext))
+	l := &link{rc: rc}
+	rc.SetControlHandler(func(typ byte, body []byte) {
+		switch typ {
+		case protocol.CtlHello:
+			if caps, ok := protocol.ParseHello(body); ok {
+				l.caps.Store(uint32(caps))
+			}
+		case protocol.CtlPong:
+			if len(body) == 4 {
+				l.pong.Store(binary.BigEndian.Uint32(body))
+			}
+		}
+	})
 	sess, err := smux.Client(rc, protocol.MuxConfig())
 	if err != nil {
 		uc.Close()
-		return nil, nil, err
+		return nil, err
 	}
+	l.sess = sess
 	slog.Debug("connected to server", "outbound", c.tag, "server", c.server)
-	return sess, rc, nil
+	return l, nil
 }
 
 // Dial opens a stream to dest through the server.

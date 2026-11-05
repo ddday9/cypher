@@ -2,12 +2,14 @@ package client
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ddday9/cypher/internal/config"
@@ -96,6 +98,7 @@ func randDuration(lo, hi time.Duration) time.Duration {
 type tunnel struct {
 	sess     *smux.Session
 	rc       *protocol.RecordConn
+	link     *link
 	id       int
 	created  time.Time
 	maxAge   time.Duration
@@ -115,7 +118,7 @@ type pool struct {
 	tag    string
 	size   int
 	rot    rotation
-	dial   func(ctx context.Context) (*smux.Session, *protocol.RecordConn, error)
+	dial   func(ctx context.Context) (*link, error)
 	nextID int
 
 	mu       sync.Mutex
@@ -126,18 +129,23 @@ type pool struct {
 	stop     chan struct{}
 	started  bool
 	tick     time.Duration
+
+	freezes atomic.Int64 // frozen tunnels detected
 }
 
-func newPool(tag string, size int, rot rotation, dial func(context.Context) (*smux.Session, *protocol.RecordConn, error)) *pool {
+func newPool(tag string, size int, rot rotation, dial func(context.Context) (*link, error)) *pool {
 	if size <= 0 {
-		size = 2
+		// One connection, like a browser talking HTTP/2 to one site; the
+		// number of parallel connections to one IP is a known DPI signal.
+		size = 1
 	}
 	return &pool{tag: tag, size: size, rot: rot, dial: dial, stop: make(chan struct{}), tick: 5 * time.Second}
 }
 
-func (p *pool) newTunnel(sess *smux.Session, rc *protocol.RecordConn) *tunnel {
+func (p *pool) newTunnel(l *link) *tunnel {
 	p.nextID++
-	t := &tunnel{sess: sess, rc: rc, id: p.nextID, created: time.Now(), lastUsed: time.Now()}
+	t := &tunnel{sess: l.sess, rc: l.rc, link: l, id: p.nextID, created: time.Now(), lastUsed: time.Now()}
+	go p.watchdog(t)
 	if p.rot.disabled {
 		t.maxAge, t.maxBytes, t.idle = 1<<62, 1<<62, 1<<62
 	} else {
@@ -199,16 +207,16 @@ func (p *pool) get(ctx context.Context, bad *tunnel) (*tunnel, error) {
 	p.dialing++
 	p.mu.Unlock()
 
-	sess, rc, err := p.dial(ctx)
+	l, err := p.dial(ctx)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.dialing--
 	if err != nil {
 		return nil, err
 	}
-	t := p.newTunnel(sess, rc)
+	t := p.newTunnel(l)
 	if p.closed {
-		sess.Close()
+		l.sess.Close()
 		return nil, fmt.Errorf("outbound %s is closed", p.tag)
 	}
 	p.active = append(p.active, t)
@@ -218,7 +226,7 @@ func (p *pool) get(ctx context.Context, bad *tunnel) (*tunnel, error) {
 func (p *pool) grow() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	sess, rc, err := p.dial(ctx)
+	l, err := p.dial(ctx)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.dialing--
@@ -227,10 +235,10 @@ func (p *pool) grow() {
 		return
 	}
 	if p.closed {
-		sess.Close()
+		l.sess.Close()
 		return
 	}
-	p.active = append(p.active, p.newTunnel(sess, rc))
+	p.active = append(p.active, p.newTunnel(l))
 }
 
 // maintain closes idle tunnels and drained tunnels with no streams left.
@@ -291,4 +299,58 @@ func (p *pool) stats() (active, draining int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.active), len(p.draining)
+}
+
+// link is one connected tunnel before it joins the pool.
+type link struct {
+	sess *smux.Session
+	rc   *protocol.RecordConn
+	caps atomic.Uint32 // server capabilities from HELLO; 0 = protocol v1 server
+	pong atomic.Uint32 // id of the last PONG received
+}
+
+// Freeze detection (protocol v2 servers): a censor that "freezes" a
+// connection silently drops its packets without resetting it, so streams
+// would hang until TCP gives up. When a tunnel with open streams has been
+// silent for freezeIdle, a PING is sent; no answer within freezeTimeout
+// means the tunnel is frozen and it is replaced at once.
+var (
+	freezeIdle    = 3 * time.Second
+	freezeTimeout = 4 * time.Second
+	watchTick     = time.Second
+)
+
+func (p *pool) watchdog(t *tunnel) {
+	tick := time.NewTicker(watchTick)
+	defer tick.Stop()
+	var pingID uint32
+	var pingAt time.Time
+	for range tick.C {
+		if t.sess.IsClosed() {
+			return
+		}
+		if t.link.caps.Load()&uint32(protocol.CapPing) == 0 {
+			continue
+		}
+		now := time.Now()
+		last := t.rc.LastRead()
+		if !pingAt.IsZero() {
+			if t.link.pong.Load() == pingID || last.After(pingAt) {
+				pingAt = time.Time{} // alive
+			} else if now.Sub(pingAt) > freezeTimeout {
+				slog.Warn("tunnel frozen (no answer from the server), reconnecting", "outbound", p.tag, "id", t.id)
+				p.freezes.Add(1)
+				t.sess.Close()
+				return
+			}
+			continue
+		}
+		if t.sess.NumStreams() > 0 && now.Sub(last) > freezeIdle {
+			pingID++
+			pingAt = now
+			var b [4]byte
+			binary.BigEndian.PutUint32(b[:], pingID)
+			t.rc.WriteControl(protocol.CtlPing, b[:])
+		}
+	}
 }
