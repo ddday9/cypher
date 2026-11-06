@@ -16,3 +16,4 @@ android/keystore.properties
 release.keystore
 *.keystore
 android/.kotlin/
+tools/compat/.work/
